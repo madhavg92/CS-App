@@ -1,0 +1,131 @@
+{
+  "design_system": {
+    "brand_name": "Anka Healthcare CS Platform",
+    "theme_strategy": "light-mode-priority",
+    "emotional_archetype": "clinical-architect",
+    "visual_style": "clean-trust-data-dense",
+    "core_philosophy": [
+      "Trust through clarity: No decorative noise.",
+      "Data is the interface: Metrics are the primary visual element.",
+      "Human-centric: Warm tones mixed with clinical precision."
+    ]
+  },
+  "typography": {
+    "fonts": {
+      "heading": {
+        "family": "Manrope",
+        "fallback": "sans-serif",
+        "weights": ["400", "600", "700", "800"],
+        "import_url": "https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap",
+        "usage_rules": "Use for all headings (h1-h4). Tight tracking (-0.02em) for sizes above 24px."
+      },
+      "body": {
+        "family": "Public Sans",
+        "fallback": "sans-serif",
+        "weights": ["400", "500", "600"],
+        "import_url": "https://fonts.googleapis.com/css2?family=Public+Sans:wght@300..700&display=swap",
+        "usage_rules": "Use for all body text, data tables, and UI controls. Excellent for numbers."
+      }
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight",
+      "h2": "text-3xl font-semibold tracking-tight",
+      "h3": "text-2xl font-semibold",
+      "body_lg": "text-lg leading-relaxed",
+      "body_base": "text-base leading-relaxed text-slate-600",
+      "caption": "text-sm text-slate-500 font-medium tracking-wide uppercase"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": {
+        "default": "#F8F9FA",
+        "paper": "#FFFFFF",
+        "subtle": "#F1F5F9"
+      },
+      "foreground": {
+        "primary": "#0F172A",
+        "secondary": "#475569",
+        "muted": "#94A3B8"
+      },
+      "brand": {
+        "primary": "#059669",
+        "primary_hover": "#047857",
+        "secondary": "#0284C7",
+        "accent": "#D97706"
+      },
+      "status": {
+        "success": "#10B981",
+        "warning": "#F59E0B",
+        "error": "#EF4444",
+        "info": "#3B82F6"
+      }
+    },
+    "gradients": {
+      "subtle_surface": "linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(248,250,252,1) 100%)",
+      "active_border": "linear-gradient(90deg, #059669 0%, #3B82F6 100%)"
+    }
+  },
+  "layout": {
+    "spacing_system": "generous",
+    "grid_strategy": "bento-high-density",
+    "container_padding": "p-6 md:p-8 lg:p-12",
+    "border_radius": {
+      "default": "rounded-lg",
+      "card": "rounded-xl",
+      "button": "rounded-md"
+    }
+  },
+  "components": {
+    "cards": {
+      "style": "flat-border",
+      "classes": "bg-white border border-slate-200 shadow-sm hover:shadow-md transition-all duration-200"
+    },
+    "buttons": {
+      "primary": "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm font-medium px-6 py-2.5 rounded-md transition-all active:scale-95",
+      "secondary": "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 font-medium px-6 py-2.5 rounded-md transition-all",
+      "ghost": "text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 px-4 py-2 rounded-md transition-colors"
+    },
+    "inputs": {
+      "style": "modern-clean",
+      "classes": "bg-white border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-md h-11 px-4 text-sm transition-all"
+    }
+  },
+  "assets": {
+    "icon_library": "lucide-react",
+    "images": {
+      "doctors": [
+        "https://images.unsplash.com/photo-1758691463582-11aea602cd4a?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "https://images.unsplash.com/photo-1642975967602-653d378f3b5b?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "https://images.unsplash.com/photo-1758518729058-b158e71c5a9b?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "https://images.unsplash.com/photo-1714328564923-d4826427c991?crop=entropy&cs=srgb&fm=jpg&q=85"
+      ],
+      "hospitals": [
+        "https://images.unsplash.com/photo-1764885518098-781b23d50e7f?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "https://images.unsplash.com/photo-1769147555720-71fc71bfc216?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "https://images.unsplash.com/photo-1764383381198-0fff09cb38b1?crop=entropy&cs=srgb&fm=jpg&q=85"
+      ]
+    }
+  },
+  "motion": {
+    "preset": "professional-calm",
+    "enter": {
+      "initial": { "opacity": 0, "y": 10 },
+      "animate": { "opacity": 1, "y": 0 },
+      "transition": { "duration": 0.4, "ease": "easeOut" }
+    },
+    "hover": {
+      "scale": 1.01,
+      "transition": { "duration": 0.2 }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Use Manrope for all headings. This is non-negotiable for the brand voice.",
+    "Do NOT use default shadcn card styles. Remove the heavy shadows. Use 1px borders with very subtle shadows (shadow-sm).",
+    "For the Dashboard, use the 'Bento' grid layout. Don't just stack cards vertically.",
+    "Use the provided doctor images for the 'Team' and 'Contacts' sections.",
+    "Use the hospital images for 'Client Profile' headers.",
+    "Ensure high contrast for all text. No light gray text on white backgrounds.",
+    "Charts should use the specific color palette: Emerald (Primary), Blue (Secondary), Terracotta (Accent)."
+  ]
+}
