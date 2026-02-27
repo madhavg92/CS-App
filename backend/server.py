@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,67 +6,422 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
-
+from emergentintegrations.llm.chat import LlmChat, UserMessage
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
 app = FastAPI()
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
+# Models
+class Contact(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    name: str
+    title: str
+    email: str
+    phone: Optional[str] = None
+    role: str  # decision-maker, influencer, user
+    last_contact: Optional[str] = None
+    notes: Optional[str] = None
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+class Client(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    status: str  # active, at-risk, healthy
+    health_score: int  # 0-100
+    relationship_owner: str
+    last_engagement: str
+    next_qbr: Optional[str] = None
+    contract_value: float
+    renewal_date: str
+    contacts: List[Contact] = []
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-# Add your routes to the router instead of directly to app
+class ClientCreate(BaseModel):
+    name: str
+    relationship_owner: str
+    contract_value: float
+    renewal_date: str
+
+class PerformanceMetrics(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    week_ending: str
+    denials_worked: int
+    denials_recovered: int
+    recovery_rate: float
+    dollars_recovered: float
+    sla_compliance: float
+    error_rate: float
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class PerformanceCreate(BaseModel):
+    client_id: str
+    client_name: str
+    week_ending: str
+    denials_worked: int
+    denials_recovered: int
+    dollars_recovered: float
+    sla_compliance: float
+    error_rate: float
+
+class Alert(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    alert_type: str  # engagement_gap, new_stakeholder, frustration, scope_creep, innovation_update, policy_alert
+    severity: str  # high, medium, low
+    message: str
+    status: str  # open, acknowledged, resolved
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class AlertCreate(BaseModel):
+    client_id: str
+    client_name: str
+    alert_type: str
+    severity: str
+    message: str
+
+class FollowUpItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    description: str
+    priority: str  # high, medium, low
+    action_type: str  # call, email
+    days_open: int
+    owner: str
+    suggested_action: str
+    status: str  # pending, completed
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class FollowUpCreate(BaseModel):
+    client_id: str
+    client_name: str
+    description: str
+    priority: str
+    action_type: str
+    owner: str
+    suggested_action: str
+
+class EmailDraftRequest(BaseModel):
+    client_id: str
+    client_name: str
+    context: str
+    email_type: str  # response, follow_up, innovation_update, policy_alert
+
+class EmailDraftResponse(BaseModel):
+    subject: str
+    body: str
+
+class Communication(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    comm_type: str  # email, call, meeting
+    subject: Optional[str] = None
+    summary: str
+    sentiment: str  # positive, neutral, negative
+    action_items: List[str] = []
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class CommunicationCreate(BaseModel):
+    client_id: str
+    client_name: str
+    comm_type: str
+    subject: Optional[str] = None
+    content: str
+
+# Helper function for PHI scrubbing
+def scrub_phi(text: str) -> str:
+    # Basic rule-based PHI redaction
+    # Redact SSN patterns
+    text = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[SSN_REDACTED]', text)
+    # Redact phone numbers
+    text = re.sub(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', '[PHONE_REDACTED]', text)
+    # Redact email addresses (excluding professional domains)
+    text = re.sub(r'\b[A-Za-z0-9._%+-]+@(?!anka|company)[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', text)
+    # Redact potential patient IDs (MRN patterns)
+    text = re.sub(r'\bMRN[:\s]*\d+\b', '[MRN_REDACTED]', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bpatient[\s]+id[:\s]*\d+\b', '[PATIENT_ID_REDACTED]', text, flags=re.IGNORECASE)
+    return text
+
+# AI Helper
+async def generate_with_ai(prompt: str, system_message: str = "You are a helpful AI assistant for healthcare customer success operations.") -> str:
+    try:
+        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=str(uuid.uuid4()),
+            system_message=system_message
+        ).with_model("openai", "gpt-5.2")
+        
+        user_message = UserMessage(text=prompt)
+        response = await chat.send_message(user_message)
+        return response
+    except Exception as e:
+        logging.error(f"AI generation error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+
+# Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Anka Healthcare CS Platform API"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+# Clients
+@api_router.get("/clients", response_model=List[Client])
+async def get_clients():
+    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
+    return clients
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+@api_router.get("/clients/{client_id}", response_model=Client)
+async def get_client(client_id: str):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
 
-# Include the router in the main app
+@api_router.post("/clients", response_model=Client)
+async def create_client(input: ClientCreate):
+    client = Client(
+        name=input.name,
+        status="healthy",
+        health_score=85,
+        relationship_owner=input.relationship_owner,
+        last_engagement=datetime.now(timezone.utc).isoformat(),
+        contract_value=input.contract_value,
+        renewal_date=input.renewal_date,
+        contacts=[]
+    )
+    await db.clients.insert_one(client.model_dump())
+    return client
+
+@api_router.put("/clients/{client_id}", response_model=Client)
+async def update_client(client_id: str, client: Client):
+    await db.clients.update_one({"id": client_id}, {"$set": client.model_dump()})
+    return client
+
+# Contacts
+@api_router.post("/clients/{client_id}/contacts", response_model=Contact)
+async def add_contact(client_id: str, contact: Contact):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    contacts = client.get('contacts', [])
+    contacts.append(contact.model_dump())
+    await db.clients.update_one({"id": client_id}, {"$set": {"contacts": contacts}})
+    return contact
+
+# Performance Metrics
+@api_router.get("/performance", response_model=List[PerformanceMetrics])
+async def get_performance_metrics(client_id: Optional[str] = None):
+    query = {"client_id": client_id} if client_id else {}
+    metrics = await db.performance_metrics.find(query, {"_id": 0}).to_list(1000)
+    return metrics
+
+@api_router.post("/performance", response_model=PerformanceMetrics)
+async def create_performance_metric(input: PerformanceCreate):
+    recovery_rate = (input.denials_recovered / input.denials_worked * 100) if input.denials_worked > 0 else 0
+    metric = PerformanceMetrics(
+        client_id=input.client_id,
+        client_name=input.client_name,
+        week_ending=input.week_ending,
+        denials_worked=input.denials_worked,
+        denials_recovered=input.denials_recovered,
+        recovery_rate=round(recovery_rate, 2),
+        dollars_recovered=input.dollars_recovered,
+        sla_compliance=input.sla_compliance,
+        error_rate=input.error_rate
+    )
+    await db.performance_metrics.insert_one(metric.model_dump())
+    return metric
+
+# Alerts
+@api_router.get("/alerts", response_model=List[Alert])
+async def get_alerts(status: Optional[str] = None):
+    query = {"status": status} if status else {}
+    alerts = await db.alerts.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return alerts
+
+@api_router.post("/alerts", response_model=Alert)
+async def create_alert(input: AlertCreate):
+    alert = Alert(
+        client_id=input.client_id,
+        client_name=input.client_name,
+        alert_type=input.alert_type,
+        severity=input.severity,
+        message=input.message,
+        status="open"
+    )
+    await db.alerts.insert_one(alert.model_dump())
+    return alert
+
+@api_router.patch("/alerts/{alert_id}")
+async def update_alert_status(alert_id: str, status: str):
+    result = await db.alerts.update_one({"id": alert_id}, {"$set": {"status": status}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"message": "Alert updated"}
+
+# Follow-up Items
+@api_router.get("/followups", response_model=List[FollowUpItem])
+async def get_followups(status: Optional[str] = None):
+    query = {"status": status} if status else {}
+    followups = await db.followups.find(query, {"_id": 0}).to_list(1000)
+    return followups
+
+@api_router.post("/followups", response_model=FollowUpItem)
+async def create_followup(input: FollowUpCreate):
+    followup = FollowUpItem(
+        client_id=input.client_id,
+        client_name=input.client_name,
+        description=input.description,
+        priority=input.priority,
+        action_type=input.action_type,
+        days_open=0,
+        owner=input.owner,
+        suggested_action=input.suggested_action,
+        status="pending"
+    )
+    await db.followups.insert_one(followup.model_dump())
+    return followup
+
+@api_router.patch("/followups/{followup_id}")
+async def update_followup_status(followup_id: str, status: str):
+    result = await db.followups.update_one({"id": followup_id}, {"$set": {"status": status}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    return {"message": "Follow-up updated"}
+
+# Communications
+@api_router.get("/communications/{client_id}", response_model=List[Communication])
+async def get_communications(client_id: str):
+    comms = await db.communications.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return comms
+
+@api_router.post("/communications", response_model=Communication)
+async def create_communication(input: CommunicationCreate):
+    # Scrub PHI from content
+    scrubbed_content = scrub_phi(input.content)
+    
+    # Analyze sentiment and extract action items with AI
+    analysis_prompt = f"""Analyze this {input.comm_type} communication:
+
+{scrubbed_content}
+
+Provide:
+1. Sentiment (positive/neutral/negative)
+2. Key action items (list)
+3. Brief summary (2-3 sentences)
+
+Format as JSON:
+{{
+  "sentiment": "...",
+  "action_items": [...],
+  "summary": "..."
+}}"""
+    
+    try:
+        analysis = await generate_with_ai(analysis_prompt)
+        import json
+        analysis_data = json.loads(analysis)
+    except:
+        analysis_data = {
+            "sentiment": "neutral",
+            "action_items": [],
+            "summary": scrubbed_content[:200]
+        }
+    
+    comm = Communication(
+        client_id=input.client_id,
+        client_name=input.client_name,
+        comm_type=input.comm_type,
+        subject=input.subject,
+        summary=analysis_data.get('summary', scrubbed_content[:200]),
+        sentiment=analysis_data.get('sentiment', 'neutral'),
+        action_items=analysis_data.get('action_items', [])
+    )
+    await db.communications.insert_one(comm.model_dump())
+    return comm
+
+# AI Email Drafting
+@api_router.post("/draft-email", response_model=EmailDraftResponse)
+async def draft_email(request: EmailDraftRequest):
+    # Get client context
+    client = await db.clients.find_one({"id": request.client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Get recent communications
+    recent_comms = await db.communications.find(
+        {"client_id": request.client_id},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(3).to_list(3)
+    
+    # Get recent metrics
+    recent_metrics = await db.performance_metrics.find(
+        {"client_id": request.client_id},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(1).to_list(1)
+    
+    comm_context = "\n".join([f"- {c['comm_type']}: {c['summary']}" for c in recent_comms])
+    metrics_context = ""
+    if recent_metrics:
+        m = recent_metrics[0]
+        metrics_context = f"Recent performance: {m['denials_recovered']} denials recovered (${m['dollars_recovered']:,.2f}), {m['sla_compliance']}% SLA compliance"
+    
+    prompt = f"""Draft a professional email for Anka Healthcare CS team.
+
+Client: {request.client_name}
+Email Type: {request.email_type}
+Context: {request.context}
+
+Recent Communications:
+{comm_context}
+
+{metrics_context}
+
+Write a concise, professional email that:
+- Addresses the context provided
+- References relevant recent interactions or metrics
+- Maintains a warm but professional healthcare tone
+- Includes a clear call-to-action
+
+Format as JSON:
+{{
+  "subject": "...",
+  "body": "..."
+}}"""
+    
+    response = await generate_with_ai(prompt)
+    import json
+    try:
+        email_data = json.loads(response)
+    except:
+        email_data = {
+            "subject": f"Update regarding {request.client_name}",
+            "body": "Dear valued partner,\n\nI wanted to reach out regarding our recent collaboration...\n\nBest regards,\nAnka Healthcare CS Team"
+        }
+    
+    return EmailDraftResponse(**email_data)
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -77,7 +432,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
