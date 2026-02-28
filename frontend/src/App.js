@@ -280,9 +280,10 @@ const ClientDetail = () => {
         title: formData.get('title'),
         email: formData.get('email'),
         phone: formData.get('phone'),
-        role: formData.get('role')
+        role: selectedRole
       });
       setShowAddContact(false);
+      setSelectedRole('');
       fetchClientData();
     } catch (error) {
       console.error('Error adding contact:', error);
