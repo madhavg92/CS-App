@@ -566,6 +566,18 @@ const ClientDetail = () => {
             </Card>
           </TabsContent>
 
+          <TabsContent value="summary" data-testid="summary-content">
+            <WeeklySummary clientId={clientId} clientName={client.name} />
+          </TabsContent>
+
+          <TabsContent value="cadences" data-testid="cadences-content">
+            <EmailCadences clientId={clientId} clientName={client.name} />
+          </TabsContent>
+
+          <TabsContent value="scheduling" data-testid="scheduling-content">
+            <SchedulingAssistant clientId={clientId} clientName={client.name} />
+          </TabsContent>
+
           <TabsContent value="actions" data-testid="actions-content">
             <Card className="bg-white border border-slate-200 shadow-sm">
               <CardHeader>
