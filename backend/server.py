@@ -129,6 +129,52 @@ class EmailDraftResponse(BaseModel):
     subject: str
     body: str
 
+class WeeklySummaryRequest(BaseModel):
+    client_id: str
+    week_ending: str
+
+class WeeklySummaryResponse(BaseModel):
+    client_name: str
+    week_ending: str
+    key_topics: List[str]
+    action_items: List[dict]
+    red_flags: List[str]
+    new_contacts: List[str]
+    escalation_items: List[str]
+
+class EmailCadence(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    cadence_type: str  # monthly_checkin, qbr_reminder, renewal_reminder
+    frequency_days: int
+    last_sent: Optional[str] = None
+    next_scheduled: str
+    status: str  # active, paused
+    auto_send: bool = False
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class EmailCadenceCreate(BaseModel):
+    client_id: str
+    client_name: str
+    cadence_type: str
+    frequency_days: int
+    auto_send: bool = False
+
+class SchedulingRequest(BaseModel):
+    client_id: str
+    client_name: str
+    meeting_type: str  # qbr, check_in, demo, implementation
+    preferred_dates: List[str]
+    duration_minutes: int
+    attendees: List[str]
+
+class SchedulingResponse(BaseModel):
+    suggested_times: List[dict]
+    email_draft: str
+    calendar_invite: str
+
 class Communication(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
