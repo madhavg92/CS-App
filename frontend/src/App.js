@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
-import { Users, BarChart3, AlertCircle, ListTodo, Mail, Plus, TrendingUp, TrendingDown, Activity, Calendar, Phone, Building2, User, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { Users, BarChart3, AlertCircle, ListTodo, Mail, Plus, TrendingUp, TrendingDown, Activity, Calendar, Phone, Building2, User, CheckCircle, Clock, AlertTriangle, FileText, Zap } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
 import { Badge } from './components/ui/badge';
@@ -12,6 +12,9 @@ import { Label } from './components/ui/label';
 import { Textarea } from './components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from './components/ui/avatar';
+import { WeeklySummary } from './components/WeeklySummary';
+import { EmailCadences } from './components/EmailCadences';
+import { SchedulingAssistant } from './components/SchedulingAssistant';
 import '@/App.css';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
