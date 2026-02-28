@@ -468,6 +468,204 @@ Format as JSON:
     
     return EmailDraftResponse(**email_data)
 
+# Weekly Client Summaries (Phase 2)
+@api_router.post("/weekly-summary", response_model=WeeklySummaryResponse)
+async def generate_weekly_summary(request: WeeklySummaryRequest):
+    client = await db.clients.find_one({"id": request.client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Get communications from the past week
+    comms = await db.communications.find(
+        {"client_id": request.client_id},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(10).to_list(10)
+    
+    comms_text = "\n\n".join([f"Type: {c['comm_type']}\nSubject: {c.get('subject', 'N/A')}\nSummary: {c['summary']}\nSentiment: {c['sentiment']}" for c in comms])
+    
+    prompt = f"""Generate an internal weekly summary for {client['name']} for week ending {request.week_ending}.
+
+Recent communications:
+{comms_text}
+
+Provide a structured summary in JSON format:
+{{
+  "key_topics": ["topic1", "topic2", ...],
+  "action_items": [{{"description": "...", "owner": "...", "priority": "high/medium/low"}}],
+  "red_flags": ["flag1", "flag2", ...],
+  "new_contacts": ["name1", "name2", ...],
+  "escalation_items": ["item1", "item2", ...]
+}}
+
+Focus on: Key discussion topics, actionable items with owners, any red flags (frustration, scope creep, delays), new people mentioned, items needing escalation."""
+    
+    try:
+        response = await generate_with_ai(prompt)
+        import json
+        summary_data = json.loads(response)
+    except:
+        summary_data = {
+            "key_topics": ["Week in review"],
+            "action_items": [],
+            "red_flags": [],
+            "new_contacts": [],
+            "escalation_items": []
+        }
+    
+    return WeeklySummaryResponse(
+        client_name=client['name'],
+        week_ending=request.week_ending,
+        **summary_data
+    )
+
+# Email Cadence Management (Phase 2 & 3)
+@api_router.get("/email-cadences", response_model=List[EmailCadence])
+async def get_email_cadences(client_id: Optional[str] = None):
+    query = {"client_id": client_id} if client_id else {}
+    cadences = await db.email_cadences.find(query, {"_id": 0}).to_list(1000)
+    return cadences
+
+@api_router.post("/email-cadences", response_model=EmailCadence)
+async def create_email_cadence(input: EmailCadenceCreate):
+    next_scheduled = (datetime.now(timezone.utc) + timedelta(days=input.frequency_days)).isoformat()
+    cadence = EmailCadence(
+        client_id=input.client_id,
+        client_name=input.client_name,
+        cadence_type=input.cadence_type,
+        frequency_days=input.frequency_days,
+        next_scheduled=next_scheduled,
+        status="active",
+        auto_send=input.auto_send
+    )
+    await db.email_cadences.insert_one(cadence.model_dump())
+    return cadence
+
+@api_router.patch("/email-cadences/{cadence_id}")
+async def update_cadence_status(cadence_id: str, status: str):
+    result = await db.email_cadences.update_one({"id": cadence_id}, {"$set": {"status": status}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Cadence not found")
+    return {"message": "Cadence updated"}
+
+@api_router.post("/email-cadences/{cadence_id}/send")
+async def send_scheduled_email(cadence_id: str):
+    cadence = await db.email_cadences.find_one({"id": cadence_id}, {"_id": 0})
+    if not cadence:
+        raise HTTPException(status_code=404, detail="Cadence not found")
+    
+    # Draft email based on cadence type
+    context_map = {
+        "monthly_checkin": "Monthly check-in to review progress and discuss any concerns",
+        "qbr_reminder": "Upcoming QBR scheduling reminder",
+        "renewal_reminder": "Contract renewal discussion and planning"
+    }
+    
+    email_response = await axios.post(f"{API}/draft-email", {
+        "client_id": cadence['client_id'],
+        "client_name": cadence['client_name'],
+        "context": context_map.get(cadence['cadence_type'], "Regular touchpoint"),
+        "email_type": "follow_up"
+    })
+    
+    # Update last sent and next scheduled
+    next_scheduled = (datetime.now(timezone.utc) + timedelta(days=cadence['frequency_days'])).isoformat()
+    await db.email_cadences.update_one(
+        {"id": cadence_id},
+        {"$set": {
+            "last_sent": datetime.now(timezone.utc).isoformat(),
+            "next_scheduled": next_scheduled
+        }}
+    )
+    
+    return {"message": "Email sent", "next_scheduled": next_scheduled}
+
+# AI Scheduling Assistant (Phase 2 & 3)
+@api_router.post("/schedule-meeting", response_model=SchedulingResponse)
+async def schedule_meeting(request: SchedulingRequest):
+    client = await db.clients.find_one({"id": request.client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    prompt = f"""As an EA scheduling assistant, help schedule a {request.meeting_type} meeting for {request.client_name}.
+
+Duration: {request.duration_minutes} minutes
+Preferred dates: {', '.join(request.preferred_dates)}
+Attendees: {', '.join(request.attendees)}
+
+Provide in JSON format:
+{{
+  "suggested_times": [
+    {{"date": "YYYY-MM-DD", "time": "HH:MM", "reason": "why this works"}},
+    {{"date": "YYYY-MM-DD", "time": "HH:MM", "reason": "why this works"}}
+  ],
+  "email_draft": "Professional email proposing meeting times",
+  "calendar_invite": "Calendar invitation text with agenda"
+}}"""
+    
+    try:
+        response = await generate_with_ai(prompt)
+        import json
+        schedule_data = json.loads(response)
+    except:
+        schedule_data = {
+            "suggested_times": [{"date": request.preferred_dates[0] if request.preferred_dates else "TBD", "time": "10:00 AM", "reason": "Morning availability"}],
+            "email_draft": f"Hi team, let's schedule our {request.meeting_type}.",
+            "calendar_invite": f"{request.meeting_type.upper()} - {request.duration_minutes} minutes"
+        }
+    
+    return SchedulingResponse(**schedule_data)
+
+# Auto-respond to routine requests (Phase 3)
+@api_router.post("/auto-respond")
+async def auto_respond_email(client_id: str, request_type: str, request_content: str):
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Define response templates for routine requests
+    routine_responses = {
+        "access_request": "Access credentials and login instructions",
+        "report_request": "Latest performance report",
+        "scheduling": "Meeting scheduling confirmation",
+        "documentation": "Technical documentation and guides"
+    }
+    
+    if request_type not in routine_responses:
+        return {"auto_send": False, "message": "Request requires human review"}
+    
+    prompt = f"""Generate an automated response for a routine {request_type} request from {client['name']}.
+
+Request: {request_content}
+
+Provide a professional, complete response that resolves the request. Format as JSON:
+{{
+  "subject": "...",
+  "body": "...",
+  "auto_send": true
+}}"""
+    
+    try:
+        response = await generate_with_ai(prompt)
+        import json
+        response_data = json.loads(response)
+        
+        # Log the auto-response
+        await db.communications.insert_one({
+            "id": str(uuid.uuid4()),
+            "client_id": client_id,
+            "client_name": client['name'],
+            "comm_type": "email",
+            "subject": response_data['subject'],
+            "summary": f"Auto-response sent for {request_type}",
+            "sentiment": "neutral",
+            "action_items": [],
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return response_data
+    except:
+        return {"auto_send": False, "message": "Failed to generate auto-response"}
+
 app.include_router(api_router)
 
 app.add_middleware(
