@@ -429,7 +429,7 @@ const ClientDetail = () => {
                           </div>
                           <div>
                             <Label htmlFor="role">Role</Label>
-                            <Select name="role" required>
+                            <Select value={selectedRole} onValueChange={setSelectedRole} required>
                               <SelectTrigger data-testid="contact-role-select">
                                 <SelectValue placeholder="Select role" />
                               </SelectTrigger>
