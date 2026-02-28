@@ -393,6 +393,9 @@ const ClientDetail = () => {
             <TabsTrigger value="contacts" data-testid="contacts-tab">Contacts</TabsTrigger>
             <TabsTrigger value="communications" data-testid="communications-tab">Communications</TabsTrigger>
             <TabsTrigger value="metrics" data-testid="metrics-tab">Performance</TabsTrigger>
+            <TabsTrigger value="summary" data-testid="summary-tab">Weekly Summary</TabsTrigger>
+            <TabsTrigger value="cadences" data-testid="cadences-tab">Email Cadences</TabsTrigger>
+            <TabsTrigger value="scheduling" data-testid="scheduling-tab">Scheduling</TabsTrigger>
             <TabsTrigger value="actions" data-testid="actions-tab">Actions</TabsTrigger>
           </TabsList>
 
