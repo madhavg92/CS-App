@@ -249,6 +249,7 @@ const ClientDetail = () => {
   const [showEmailDraft, setShowEmailDraft] = useState(false);
   const [emailDraft, setEmailDraft] = useState({ subject: '', body: '' });
   const [draftLoading, setDraftLoading] = useState(false);
+  const [selectedRole, setSelectedRole] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
