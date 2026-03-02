@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Building2, Users, Plus, Trash2, UserPlus } from 'lucide-react';
+import { Building2, Users, Plus, Trash2, UserPlus, Network, ArrowRight } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -13,6 +13,110 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+// Org Chart Visualization Component
+const OrgChartView = ({ client, mappings, lobs, teamMembers }) => {
+  const getRoleBadgeColor = (role) => {
+    const colors = {
+      manager: 'bg-purple-600',
+      supervisor: 'bg-blue-600',
+      team_lead: 'bg-emerald-600'
+    };
+    return colors[role] || 'bg-slate-600';
+  };
+
+  return (
+    <div className="relative">
+      <div className="grid grid-cols-2 gap-12">
+        {/* Client Side */}
+        <div>
+          <div className="mb-6 text-center">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Client Organization</h3>
+            <div className="inline-block p-4 bg-blue-100 rounded-lg border-2 border-blue-300">
+              <Building2 className="h-8 w-8 text-blue-700 mx-auto mb-2" />
+              <div className="font-bold text-blue-900">{client?.name}</div>
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            {mappings.map((mapping, idx) => (
+              <div key={mapping.id} className="relative">
+                <div className="p-4 bg-blue-50 rounded-lg border-2 border-blue-200 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-blue-900">{mapping.lob_name}</div>
+                      <div className="text-sm text-blue-700">{mapping.anka_team_members.length} team members</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-0.5 bg-emerald-500"></div>
+                      <ArrowRight className="h-5 w-5 text-emerald-600" />
+                    </div>
+                  </div>
+                </div>
+                {/* Connection lines */}
+                <svg className="absolute top-1/2 left-full w-12 h-1 -translate-y-1/2 pointer-events-none z-10" style={{ marginLeft: '-2px' }}>
+                  <line x1="0" y1="0" x2="48" y2="0" stroke="#10b981" strokeWidth="2" strokeDasharray="4,4" />
+                </svg>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Anka Delivery Team Side */}
+        <div>
+          <div className="mb-6 text-center">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Anka Delivery Team</h3>
+            <div className="inline-block p-4 bg-emerald-100 rounded-lg border-2 border-emerald-300">
+              <Users className="h-8 w-8 text-emerald-700 mx-auto mb-2" />
+              <div className="font-bold text-emerald-900">Delivery Org</div>
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            {mappings.map((mapping) => (
+              <div key={mapping.id} className="p-4 bg-emerald-50 rounded-lg border-2 border-emerald-200">
+                <div className="font-semibold text-emerald-900 mb-2">{mapping.lob_name} Team</div>
+                <div className="space-y-2">
+                  {mapping.anka_team_members.map(memberId => {
+                    const member = teamMembers.find(m => m.id === memberId);
+                    return member ? (
+                      <div key={memberId} className="flex items-center gap-2 p-2 bg-white rounded border border-emerald-200">
+                        <div className={`w-2 h-2 rounded-full ${getRoleBadgeColor(member.role)}`}></div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-slate-900">{member.name}</div>
+                          <div className="text-xs text-slate-600">{member.role}</div>
+                        </div>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="mt-8 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        <h4 className="font-semibold text-slate-900 mb-3">Team Roles</h4>
+        <div className="flex gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-purple-600"></div>
+            <span className="text-sm text-slate-700">Manager</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-blue-600"></div>
+            <span className="text-sm text-slate-700">Supervisor</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-emerald-600"></div>
+            <span className="text-sm text-slate-700">Team Lead</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const OrgMappingPage = () => {
   const [clients, setClients] = useState([]);
