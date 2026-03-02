@@ -30,6 +30,7 @@ const Sidebar = () => {
     { icon: ListTodo, label: 'Follow-ups', path: '/followups', testId: 'nav-followups' },
     { icon: BarChart3, label: 'Reports', path: '/reports', testId: 'nav-reports' },
     { icon: Mail, label: 'Communications', path: '/communications', testId: 'nav-communications' },
+    { icon: Settings, label: 'Settings', path: '/settings', testId: 'nav-settings' },
   ];
 
   const isActive = (path) => {
