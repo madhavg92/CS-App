@@ -175,6 +175,61 @@ class SchedulingResponse(BaseModel):
     email_draft: str
     calendar_invite: str
 
+class LOB(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str  # EV, Prior Auth, Coding, Billing, AR, Payment Posting
+    description: Optional[str] = None
+
+class AnkaTeamMember(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    role: str  # manager, supervisor, team_lead
+    email: str
+    phone: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class ClientLOBMapping(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    lob_id: str
+    lob_name: str
+    anka_team_members: List[str] = []  # List of AnkaTeamMember IDs
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class ClientLOBMappingCreate(BaseModel):
+    client_id: str
+    client_name: str
+    lob_id: str
+    lob_name: str
+    anka_team_member_ids: List[str]
+
+class ScheduledReview(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    review_type: str  # weekly, monthly, qbr
+    scheduled_date: str
+    scheduled_time: str
+    duration_minutes: int
+    attendees: List[str] = []  # AnkaTeamMember IDs
+    attendee_names: List[str] = []
+    status: str = "scheduled"  # scheduled, completed, cancelled
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class ScheduledReviewCreate(BaseModel):
+    client_id: str
+    client_name: str
+    review_type: str
+    scheduled_date: str
+    scheduled_time: str
+    duration_minutes: int
+    attendee_ids: List[str]
+
 class Communication(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
