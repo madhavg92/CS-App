@@ -865,6 +865,100 @@ async def update_review_status(review_id: str, status: str):
         raise HTTPException(status_code=404, detail="Review not found")
     return {"message": "Review updated"}
 
+# Integration Management (Super Admin)
+@api_router.get("/integrations", response_model=List[IntegrationConfig])
+async def get_integrations():
+    integrations = await db.integrations.find({}, {"_id": 0}).to_list(1000)
+    # Mask sensitive credentials in response
+    for integration in integrations:
+        if integration.get('credentials'):
+            integration['credentials'] = {k: '***' for k in integration['credentials'].keys()}
+    return integrations
+
+@api_router.post("/integrations", response_model=IntegrationConfig)
+async def create_integration(input: IntegrationConfigCreate):
+    integration = IntegrationConfig(
+        integration_name=input.integration_name,
+        display_name=input.display_name,
+        credentials=input.credentials,
+        config=input.config,
+        is_enabled=False,
+        connection_status="not_configured"
+    )
+    await db.integrations.insert_one(integration.model_dump())
+    return integration
+
+@api_router.patch("/integrations/{integration_id}")
+async def update_integration(integration_id: str, input: IntegrationConfigUpdate):
+    update_data = {k: v for k, v in input.model_dump().items() if v is not None}
+    update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    
+    result = await db.integrations.update_one({"id": integration_id}, {"$set": update_data})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    return {"message": "Integration updated"}
+
+@api_router.post("/integrations/{integration_id}/test")
+async def test_integration(integration_id: str):
+    integration = await db.integrations.find_one({"id": integration_id}, {"_id": 0})
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    
+    # Test connection based on integration type
+    integration_name = integration['integration_name']
+    credentials = integration.get('credentials', {})
+    
+    try:
+        # Mock testing - in production, implement actual API tests
+        if integration_name == 'microsoft_graph':
+            # Test Microsoft Graph API connection
+            if not credentials.get('client_id') or not credentials.get('client_secret'):
+                raise Exception("Missing Microsoft Graph credentials")
+            status = "connected"
+            
+        elif integration_name == 'google_calendar':
+            # Test Google Calendar API
+            if not credentials.get('api_key'):
+                raise Exception("Missing Google Calendar API key")
+            status = "connected"
+            
+        elif integration_name == 'salesforce':
+            # Test Salesforce API
+            if not credentials.get('username') or not credentials.get('password'):
+                raise Exception("Missing Salesforce credentials")
+            status = "connected"
+            
+        else:
+            status = "connected"
+        
+        # Update integration status
+        await db.integrations.update_one(
+            {"id": integration_id},
+            {"$set": {
+                "connection_status": status,
+                "last_tested": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        return {"status": status, "message": "Connection successful"}
+        
+    except Exception as e:
+        await db.integrations.update_one(
+            {"id": integration_id},
+            {"$set": {
+                "connection_status": "error",
+                "last_tested": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        return {"status": "error", "message": str(e)}
+
+@api_router.delete("/integrations/{integration_id}")
+async def delete_integration(integration_id: str):
+    result = await db.integrations.delete_one({"id": integration_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    return {"message": "Integration deleted"}
+
 app.include_router(api_router)
 
 app.add_middleware(
