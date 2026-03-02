@@ -721,6 +721,126 @@ Provide a professional, complete response that resolves the request. Format as J
     except:
         return {"auto_send": False, "message": "Failed to generate auto-response"}
 
+# LOB Management
+@api_router.get("/lobs", response_model=List[LOB])
+async def get_lobs():
+    lobs = await db.lobs.find({}, {"_id": 0}).to_list(1000)
+    return lobs
+
+@api_router.post("/lobs", response_model=LOB)
+async def create_lob(lob: LOB):
+    await db.lobs.insert_one(lob.model_dump())
+    return lob
+
+# Anka Team Members
+@api_router.get("/team-members", response_model=List[AnkaTeamMember])
+async def get_team_members():
+    members = await db.team_members.find({}, {"_id": 0}).to_list(1000)
+    return members
+
+@api_router.post("/team-members", response_model=AnkaTeamMember)
+async def create_team_member(member: AnkaTeamMember):
+    await db.team_members.insert_one(member.model_dump())
+    return member
+
+# Client LOB Mapping
+@api_router.get("/client-lob-mappings", response_model=List[ClientLOBMapping])
+async def get_client_lob_mappings(client_id: Optional[str] = None):
+    query = {"client_id": client_id} if client_id else {}
+    mappings = await db.client_lob_mappings.find(query, {"_id": 0}).to_list(1000)
+    return mappings
+
+@api_router.post("/client-lob-mappings", response_model=ClientLOBMapping)
+async def create_client_lob_mapping(input: ClientLOBMappingCreate):
+    mapping = ClientLOBMapping(
+        client_id=input.client_id,
+        client_name=input.client_name,
+        lob_id=input.lob_id,
+        lob_name=input.lob_name,
+        anka_team_members=input.anka_team_member_ids
+    )
+    await db.client_lob_mappings.insert_one(mapping.model_dump())
+    return mapping
+
+@api_router.delete("/client-lob-mappings/{mapping_id}")
+async def delete_client_lob_mapping(mapping_id: str):
+    result = await db.client_lob_mappings.delete_one({"id": mapping_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return {"message": "Mapping deleted"}
+
+# Scheduled Reviews & Calendar
+@api_router.get("/scheduled-reviews", response_model=List[ScheduledReview])
+async def get_scheduled_reviews(
+    client_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    attendee_id: Optional[str] = None
+):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if start_date and end_date:
+        query["scheduled_date"] = {"$gte": start_date, "$lte": end_date}
+    if attendee_id:
+        query["attendees"] = attendee_id
+    
+    reviews = await db.scheduled_reviews.find(query, {"_id": 0}).sort("scheduled_date", 1).to_list(1000)
+    return reviews
+
+@api_router.post("/scheduled-reviews", response_model=ScheduledReview)
+async def create_scheduled_review(input: ScheduledReviewCreate):
+    # Get attendee names
+    attendee_names = []
+    for attendee_id in input.attendee_ids:
+        member = await db.team_members.find_one({"id": attendee_id}, {"_id": 0})
+        if member:
+            attendee_names.append(member['name'])
+    
+    review = ScheduledReview(
+        client_id=input.client_id,
+        client_name=input.client_name,
+        review_type=input.review_type,
+        scheduled_date=input.scheduled_date,
+        scheduled_time=input.scheduled_time,
+        duration_minutes=input.duration_minutes,
+        attendees=input.attendee_ids,
+        attendee_names=attendee_names,
+        status="scheduled"
+    )
+    await db.scheduled_reviews.insert_one(review.model_dump())
+    return review
+
+@api_router.get("/calendar/conflicts")
+async def check_calendar_conflicts(date: str, time: str, attendee_ids: str):
+    # Parse attendee_ids (comma-separated)
+    attendee_list = attendee_ids.split(',') if attendee_ids else []
+    
+    # Find reviews on the same date
+    reviews = await db.scheduled_reviews.find(
+        {"scheduled_date": date, "status": "scheduled"},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    conflicts = []
+    for review in reviews:
+        # Check if any attendees overlap
+        overlapping = set(review['attendees']) & set(attendee_list)
+        if overlapping:
+            conflicts.append({
+                "review": review,
+                "conflicting_attendees": list(overlapping)
+            })
+    
+    return {"conflicts": conflicts, "has_conflicts": len(conflicts) > 0}
+
+@api_router.patch("/scheduled-reviews/{review_id}")
+async def update_review_status(review_id: str, status: str):
+    result = await db.scheduled_reviews.update_one({"id": review_id}, {"$set": {"status": status}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"message": "Review updated"}
+
 app.include_router(api_router)
 
 app.add_middleware(
