@@ -400,6 +400,119 @@ const SettingsPage = () => {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="flows">
+          <div className="space-y-6">
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-4">
+                  <Zap className="h-6 w-6 text-blue-600 mt-1" />
+                  <div>
+                    <h3 className="font-semibold text-blue-900 mb-2">How Integrations Connect to Your Data</h3>
+                    <p className="text-blue-800 text-sm mb-4">
+                      Each integration automatically syncs data between external services and your platform. 
+                      Configure automations to trigger actions based on events.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                      <div className="flex items-center gap-2 text-blue-700">
+                        <ArrowRight className="h-4 w-4" />
+                        <span>Emails → Communications</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-blue-700">
+                        <ArrowRight className="h-4 w-4" />
+                        <span>Calendar → Review Schedule</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-blue-700">
+                        <ArrowRight className="h-4 w-4" />
+                        <span>Alerts → Slack/SMS</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white border-slate-200">
+              <CardHeader>
+                <CardTitle>Example: Microsoft Graph Integration</CardTitle>
+                <CardDescription>See how Outlook connects to your platform</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="flex items-center gap-4 mb-3">
+                      <Badge className="bg-blue-100 text-blue-700">Outlook Emails</Badge>
+                      <ArrowRight className="h-5 w-5 text-emerald-600" />
+                      <Badge className="bg-emerald-100 text-emerald-700">Communications History</Badge>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-2">
+                      <strong>What happens:</strong> Every 15 minutes, platform fetches new emails from client contacts, 
+                      runs AI sentiment analysis, and creates Communication records automatically.
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      <strong>Result:</strong> Your Communications page shows all client emails with sentiment scores (positive/negative/neutral)
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="flex items-center gap-4 mb-3">
+                      <Badge className="bg-emerald-100 text-emerald-700">Review Calendar</Badge>
+                      <span className="text-purple-600">↔️</span>
+                      <Badge className="bg-blue-100 text-blue-700">Outlook Calendar</Badge>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-2">
+                      <strong>What happens:</strong> When you schedule a review in platform, it automatically creates 
+                      calendar invite in Outlook. Changes sync both ways in real-time.
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      <strong>Result:</strong> Team members see meetings in their Outlook calendar with all details
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white border-slate-200">
+              <CardHeader>
+                <CardTitle>Automation Rules</CardTitle>
+                <CardDescription>Auto-trigger actions based on events</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-emerald-900">✅ Active</span>
+                      <Badge className="bg-emerald-600 text-white">Slack</Badge>
+                    </div>
+                    <p className="text-sm text-emerald-800">
+                      <strong>When:</strong> High priority alert created → <strong>Then:</strong> Send to #cs-alerts channel
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-slate-700">⏸️ Inactive</span>
+                      <Badge className="bg-slate-600 text-white">SMS</Badge>
+                    </div>
+                    <p className="text-sm text-slate-700">
+                      <strong>When:</strong> Health score drops below 70 → <strong>Then:</strong> Text relationship owner
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-slate-700">⏸️ Inactive</span>
+                      <Badge className="bg-slate-600 text-white">Salesforce</Badge>
+                    </div>
+                    <p className="text-sm text-slate-700">
+                      <strong>When:</strong> Every Monday 8 AM → <strong>Then:</strong> Push weekly metrics to Salesforce
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
       </Tabs>
     </div>
   );
