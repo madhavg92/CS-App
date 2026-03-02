@@ -230,6 +230,30 @@ class ScheduledReviewCreate(BaseModel):
     duration_minutes: int
     attendee_ids: List[str]
 
+class IntegrationConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    integration_name: str  # microsoft_graph, google_calendar, salesforce, etc.
+    display_name: str
+    is_enabled: bool = False
+    credentials: dict = {}  # Encrypted storage
+    config: dict = {}  # Additional configuration
+    last_tested: Optional[str] = None
+    connection_status: str = "not_configured"  # not_configured, connected, error
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class IntegrationConfigCreate(BaseModel):
+    integration_name: str
+    display_name: str
+    credentials: dict
+    config: dict = {}
+
+class IntegrationConfigUpdate(BaseModel):
+    is_enabled: Optional[bool] = None
+    credentials: Optional[dict] = None
+    config: Optional[dict] = None
+
 class Communication(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
