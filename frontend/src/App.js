@@ -203,6 +203,7 @@ function App() {
             <Route path="/scheduling" element={<SchedulingPage />} />
             <Route path="/org-mapping" element={<OrgMappingPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </div>
       </div>
