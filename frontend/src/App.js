@@ -1,15 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import axios from 'axios';
-import { Users, BarChart3, AlertCircle, ListTodo, Mail, Plus, Activity, Calendar, Building2, CheckCircle, AlertTriangle, FileText, Send, TrendingUp, Home, Settings } from 'lucide-react';
-import { Button } from './components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
-import { Badge } from './components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './components/ui/dialog';
-import { Input } from './components/ui/input';
-import { Label } from './components/ui/label';
-import { Textarea } from './components/ui/textarea';
-import { Avatar, AvatarFallback } from './components/ui/avatar';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { Users, BarChart3, AlertCircle, ListTodo, Mail, Activity, Calendar, Home } from 'lucide-react';
+import ClientsPage from './pages/ClientsPage';
+import ClientDetailPage from './pages/ClientDetailPage';
 import '@/App.css';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -30,8 +23,13 @@ const Sidebar = () => {
     { icon: Calendar, label: 'Scheduling', path: '/scheduling', testId: 'nav-scheduling' },
   ];
 
+  const isActive = (path) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  };
+
   return (
-    <div className="w-64 bg-white border-r border-slate-200 h-screen fixed left-0 top-0 flex flex-col">
+    <div className="w-64 bg-white border-r border-slate-200 h-screen fixed left-0 top-0 flex flex-col z-50">
       <div className="p-6 border-b border-slate-200">
         <div className="flex items-center gap-3">
           <Activity className="h-8 w-8 text-emerald-600" />
@@ -42,18 +40,18 @@ const Sidebar = () => {
         </div>
       </div>
       
-      <nav className="flex-1 p-4">
+      <nav className="flex-1 p-4 overflow-y-auto">
         <ul className="space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const active = isActive(item.path);
             return (
               <li key={item.path}>
                 <button
                   onClick={() => navigate(item.path)}
                   data-testid={item.testId}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                    isActive
+                    active
                       ? 'bg-emerald-50 text-emerald-700 font-medium'
                       : 'text-slate-700 hover:bg-slate-50'
                   }`}
@@ -81,6 +79,7 @@ const Dashboard = () => {
 
   const fetchStats = async () => {
     try {
+      const axios = (await import('axios')).default;
       const [clientsRes, alertsRes, followupsRes] = await Promise.all([
         axios.get(`${API}/clients`),
         axios.get(`${API}/alerts?status=open`),
@@ -98,6 +97,28 @@ const Dashboard = () => {
     }
   };
 
+  const StatCard = ({ icon: Icon, label, value, subtext, color, onClick, testId }) => {
+    const { Card, CardHeader, CardTitle, CardContent } = require('./components/ui/card');
+    return (
+      <Card 
+        className={`bg-white border-slate-200 hover:shadow-lg transition-shadow ${onClick ? 'cursor-pointer' : ''}`}
+        onClick={onClick}
+        data-testid={testId}
+      >
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-slate-600 flex items-center gap-2">
+            <Icon className="h-4 w-4" />
+            {label}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className={`text-3xl font-bold ${color || 'text-slate-900'}`}>{value}</div>
+          {subtext && <p className="text-sm text-slate-600 mt-1">{subtext}</p>}
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className="p-8">
       <div className="mb-8">
@@ -106,114 +127,53 @@ const Dashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card className="bg-white border-slate-200 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate('/clients')} data-testid="stat-total-clients">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600 flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              Total Clients
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900">{stats.clients}</div>
-            <p className="text-sm text-emerald-600 mt-1">{stats.healthyClients} healthy</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white border-slate-200 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate('/alerts')} data-testid="stat-active-alerts">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600 flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" />
-              Active Alerts
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-amber-600">{stats.alerts}</div>
-            <p className="text-sm text-slate-600 mt-1">Needs attention</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white border-slate-200 hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate('/followups')} data-testid="stat-pending-followups">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600 flex items-center gap-2">
-              <ListTodo className="h-4 w-4" />
-              Pending Follow-ups
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{stats.followups}</div>
-            <p className="text-sm text-slate-600 mt-1">Action items</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-emerald-50 border-emerald-200 hover:shadow-lg transition-shadow">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-emerald-700 flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              Health Score Avg
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-emerald-700">87%</div>
-            <p className="text-sm text-emerald-600 mt-1">Above target</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="bg-white border-slate-200">
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button className="w-full justify-start bg-emerald-600 hover:bg-emerald-700" onClick={() => navigate('/clients')} data-testid="quick-view-clients">
-              <Users className="h-4 w-4 mr-2" />
-              View All Clients
-            </Button>
-            <Button className="w-full justify-start" variant="outline" onClick={() => navigate('/alerts')} data-testid="quick-review-alerts">
-              <AlertCircle className="h-4 w-4 mr-2" />
-              Review Alerts
-            </Button>
-            <Button className="w-full justify-start" variant="outline" onClick={() => navigate('/communications')} data-testid="quick-draft-email">
-              <Mail className="h-4 w-4 mr-2" />
-              Draft Email
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white border-slate-200">
-          <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="h-2 w-2 rounded-full bg-emerald-600 mt-2"></div>
-                <div>
-                  <p className="text-sm text-slate-900 font-medium">New client added</p>
-                  <p className="text-xs text-slate-600">Springfield General Hospital</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <div className="h-2 w-2 rounded-full bg-amber-600 mt-2"></div>
-                <div>
-                  <p className="text-sm text-slate-900 font-medium">Alert triggered</p>
-                  <p className="text-xs text-slate-600">Engagement gap detected</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <div className="h-2 w-2 rounded-full bg-blue-600 mt-2"></div>
-                <div>
-                  <p className="text-sm text-slate-900 font-medium">Follow-up completed</p>
-                  <p className="text-xs text-slate-600">QBR scheduled with client</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <StatCard
+          icon={Users}
+          label="Total Clients"
+          value={stats.clients}
+          subtext={`${stats.healthyClients} healthy`}
+          color="text-slate-900"
+          onClick={() => navigate('/clients')}
+          testId="stat-total-clients"
+        />
+        <StatCard
+          icon={AlertCircle}
+          label="Active Alerts"
+          value={stats.alerts}
+          subtext="Needs attention"
+          color="text-amber-600"
+          onClick={() => navigate('/alerts')}
+          testId="stat-active-alerts"
+        />
+        <StatCard
+          icon={ListTodo}
+          label="Pending Follow-ups"
+          value={stats.followups}
+          subtext="Action items"
+          color="text-blue-600"
+          onClick={() => navigate('/followups')}
+          testId="stat-pending-followups"
+        />
+        <StatCard
+          icon={Activity}
+          label="Health Score Avg"
+          value="87%"
+          subtext="Above target"
+          color="text-emerald-700"
+          testId="stat-health-avg"
+        />
       </div>
     </div>
   );
 };
+
+// Placeholder Pages
+const PlaceholderPage = ({ title }) => (
+  <div className="p-8">
+    <h2 className="text-3xl font-bold text-slate-900">{title}</h2>
+    <p className="text-slate-600 mt-2">This section will be implemented next</p>
+  </div>
+);
 
 // Main App Component
 function App() {
@@ -224,12 +184,13 @@ function App() {
         <div className="ml-64 flex-1">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/clients" element={<div className="p-8"><h2 className="text-3xl font-bold">Clients - Coming in next iteration</h2></div>} />
-            <Route path="/alerts" element={<div className="p-8"><h2 className="text-3xl font-bold">Alerts - Coming in next iteration</h2></div>} />
-            <Route path="/followups" element={<div className="p-8"><h2 className="text-3xl font-bold">Follow-ups - Coming in next iteration</h2></div>} />
-            <Route path="/reports" element={<div className="p-8"><h2 className="text-3xl font-bold">Reports - Coming in next iteration</h2></div>} />
-            <Route path="/communications" element={<div className="p-8"><h2 className="text-3xl font-bold">Communications - Coming in next iteration</h2></div>} />
-            <Route path="/scheduling" element={<div className="p-8"><h2 className="text-3xl font-bold">Scheduling - Coming in next iteration</h2></div>} />
+            <Route path="/clients" element={<ClientsPage />} />
+            <Route path="/client/:clientId" element={<ClientDetailPage />} />
+            <Route path="/alerts" element={<PlaceholderPage title="Alerts" />} />
+            <Route path="/followups" element={<PlaceholderPage title="Follow-ups" />} />
+            <Route path="/reports" element={<PlaceholderPage title="Reports" />} />
+            <Route path="/communications" element={<PlaceholderPage title="Communications" />} />
+            <Route path="/scheduling" element={<PlaceholderPage title="Scheduling" />} />
           </Routes>
         </div>
       </div>
