@@ -191,11 +191,11 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<ClientsPage />} />
             <Route path="/client/:clientId" element={<ClientDetailPage />} />
-            <Route path="/alerts" element={<PlaceholderPage title="Alerts" />} />
-            <Route path="/followups" element={<PlaceholderPage title="Follow-ups" />} />
-            <Route path="/reports" element={<PlaceholderPage title="Reports" />} />
-            <Route path="/communications" element={<PlaceholderPage title="Communications" />} />
-            <Route path="/scheduling" element={<PlaceholderPage title="Scheduling" />} />
+            <Route path="/alerts" element={<AlertsPage />} />
+            <Route path="/followups" element={<FollowUpsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/communications" element={<CommunicationsPage />} />
+            <Route path="/scheduling" element={<SchedulingPage />} />
           </Routes>
         </div>
       </div>
