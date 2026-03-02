@@ -352,8 +352,11 @@ const OrgMappingPage = () => {
             {selectedClientData && (
               <Card className="bg-white border-slate-200">
                 <CardHeader>
-                  <CardTitle>{selectedClientData.name} - LOB Structure</CardTitle>
-                  <CardDescription>Delivery team assignments across LOBs</CardDescription>
+                  <div className="flex items-center gap-2">
+                    <Network className="h-5 w-5 text-emerald-600" />
+                    <CardTitle>{selectedClientData.name} - Organization Structure</CardTitle>
+                  </div>
+                  <CardDescription>Visual mapping of client LOBs to Anka delivery team</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {mappings.length === 0 ? (
@@ -362,38 +365,12 @@ const OrgMappingPage = () => {
                       <p className="text-slate-600">No LOB mappings configured yet</p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      {mappings.map((mapping) => (
-                        <div key={mapping.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <h4 className="font-semibold text-lg text-slate-900">{mapping.lob_name}</h4>
-                              <p className="text-sm text-slate-600">
-                                {mapping.anka_team_members.length} team member(s) assigned
-                              </p>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteMapping(mapping.id)}
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {mapping.anka_team_members.map(memberId => {
-                              const member = teamMembers.find(m => m.id === memberId);
-                              return member ? (
-                                <Badge key={memberId} className={`${getRoleBadgeColor(member.role)} px-3 py-1`}>
-                                  {member.name} ({member.role})
-                                </Badge>
-                              ) : null;
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <OrgChartView 
+                      client={selectedClientData}
+                      mappings={mappings}
+                      lobs={lobs}
+                      teamMembers={teamMembers}
+                    />
                   )}
                 </CardContent>
               </Card>
