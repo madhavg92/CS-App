@@ -220,6 +220,7 @@ const SettingsPage = () => {
         <TabsList className="bg-white border border-slate-200">
           <TabsTrigger value="integrations">API Integrations</TabsTrigger>
           <TabsTrigger value="available">Available Integrations</TabsTrigger>
+          <TabsTrigger value="flows">Data Flows & Automation</TabsTrigger>
         </TabsList>
 
         <TabsContent value="integrations">
