@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Settings as SettingsIcon, Plus, Trash2, Check, X, RefreshCw, Shield, Key, Mail, Calendar, Database, Cloud } from 'lucide-react';
+import { Settings as SettingsIcon, Plus, Trash2, Check, X, RefreshCw, Shield, Key, Mail, Calendar, Database, Cloud, Zap, ArrowRight } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
