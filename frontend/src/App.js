@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
-import { Users, BarChart3, AlertCircle, ListTodo, Mail, Activity, Calendar, Home } from 'lucide-react';
+import { Users, BarChart3, AlertCircle, ListTodo, Mail, Activity, Calendar, Home, Network } from 'lucide-react';
 import ClientsPage from './pages/ClientsPage';
 import ClientDetailPage from './pages/ClientDetailPage';
 import AlertsPage from './pages/AlertsPage';
@@ -8,6 +8,8 @@ import FollowUpsPage from './pages/FollowUpsPage';
 import ReportsPage from './pages/ReportsPage';
 import CommunicationsPage from './pages/CommunicationsPage';
 import SchedulingPage from './pages/SchedulingPage';
+import OrgMappingPage from './pages/OrgMappingPage';
+import CalendarPage from './pages/CalendarPage';
 import '@/App.css';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
