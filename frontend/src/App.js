@@ -23,11 +23,12 @@ const Sidebar = () => {
   const menuItems = [
     { icon: Home, label: 'Dashboard', path: '/', testId: 'nav-dashboard' },
     { icon: Users, label: 'Clients', path: '/clients', testId: 'nav-clients' },
+    { icon: Network, label: 'Org Mapping', path: '/org-mapping', testId: 'nav-org-mapping' },
+    { icon: Calendar, label: 'Review Calendar', path: '/calendar', testId: 'nav-calendar' },
     { icon: AlertCircle, label: 'Alerts', path: '/alerts', testId: 'nav-alerts' },
     { icon: ListTodo, label: 'Follow-ups', path: '/followups', testId: 'nav-followups' },
     { icon: BarChart3, label: 'Reports', path: '/reports', testId: 'nav-reports' },
     { icon: Mail, label: 'Communications', path: '/communications', testId: 'nav-communications' },
-    { icon: Calendar, label: 'Scheduling', path: '/scheduling', testId: 'nav-scheduling' },
   ];
 
   const isActive = (path) => {
