@@ -199,6 +199,8 @@ function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/communications" element={<CommunicationsPage />} />
             <Route path="/scheduling" element={<SchedulingPage />} />
+            <Route path="/org-mapping" element={<OrgMappingPage />} />
+            <Route path="/calendar" element={<CalendarPage />} />
           </Routes>
         </div>
       </div>
