@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   Settings as SettingsIcon, Users, Bell, Shield, Save, 
-  UserPlus, Edit2, Check, X, FileText, Clock
+  UserPlus, Edit2, Check, X, FileText, Clock, Plus
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -50,6 +50,11 @@ const SettingsPage = () => {
     end_date: ''
   });
 
+  // Policy updates
+  const [policyUpdates, setPolicyUpdates] = useState([]);
+  const [showAddPolicy, setShowAddPolicy] = useState(false);
+  const [policyLoading, setPolicyLoading] = useState(false);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -57,6 +62,9 @@ const SettingsPage = () => {
   useEffect(() => {
     if (activeTab === 'audit') {
       fetchAuditLogs();
+    }
+    if (activeTab === 'policies') {
+      fetchPolicyUpdates();
     }
   }, [activeTab, auditFilters]);
 
@@ -72,6 +80,18 @@ const SettingsPage = () => {
       console.error('Error fetching settings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPolicyUpdates = async () => {
+    setPolicyLoading(true);
+    try {
+      const response = await axios.get(`${API}/policy-updates`);
+      setPolicyUpdates(response.data);
+    } catch (error) {
+      console.error('Error fetching policy updates:', error);
+    } finally {
+      setPolicyLoading(false);
     }
   };
 
@@ -200,6 +220,10 @@ const SettingsPage = () => {
           <TabsTrigger value="audit" data-testid="tab-audit">
             <FileText className="h-4 w-4 mr-2" />
             Audit Log
+          </TabsTrigger>
+          <TabsTrigger value="policies" data-testid="tab-policies">
+            <FileText className="h-4 w-4 mr-2" />
+            Policies
           </TabsTrigger>
         </TabsList>
 
@@ -550,6 +574,65 @@ const SettingsPage = () => {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Policies Tab */}
+        <TabsContent value="policies" className="mt-6">
+          <Card className="bg-white border border-slate-200 shadow-sm">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Policy Updates</CardTitle>
+                  <CardDescription>Track healthcare policy changes and generate client impact alerts</CardDescription>
+                </div>
+                <Button onClick={() => setShowAddPolicy(true)} className="bg-[#1B4F72] hover:bg-[#154360]">
+                  <Plus className="h-4 w-4 mr-2" /> Add Policy Update
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {policyUpdates.length === 0 ? (
+                <div className="text-center py-8">
+                  <FileText className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                  <p className="text-slate-500">No policy updates yet</p>
+                  <p className="text-sm text-slate-400 mt-1">Add a policy update to generate client-specific impact alerts</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {policyUpdates.map(policy => (
+                    <div key={policy.id} className="flex items-center justify-between p-4 border border-slate-200 rounded-lg">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-slate-900">{policy.title}</h4>
+                          <Badge variant="outline">{policy.policy_type?.replace(/_/g, ' ')}</Badge>
+                          <Badge variant={policy.status === 'active' ? 'default' : 'secondary'}>{policy.status}</Badge>
+                        </div>
+                        <p className="text-sm text-slate-500 mt-1">{policy.description}</p>
+                        <div className="flex gap-4 mt-2 text-xs text-slate-400">
+                          <span>Services: {policy.affected_services?.join(', ') || 'None'}</span>
+                          <span>Effective: {policy.effective_date || 'TBD'}</span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const response = await axios.post(`${API}/policy-updates/${policy.id}/generate-alerts`);
+                            alert(`Generated ${response.data.alerts_created} alerts`);
+                          } catch (error) {
+                            console.error('Error generating alerts:', error);
+                          }
+                        }}
+                      >
+                        Generate Alerts
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Add User Dialog */}
@@ -613,6 +696,55 @@ const SettingsPage = () => {
               Add User
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Policy Dialog */}
+      <Dialog open={showAddPolicy} onOpenChange={setShowAddPolicy}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Add Policy Update</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            try {
+              await axios.post(`${API}/policy-updates`, {
+                title: formData.get('title'),
+                description: formData.get('description'),
+                policy_type: formData.get('policy_type'),
+                affected_services: formData.get('affected_services').split(',').map(s => s.trim()).filter(Boolean),
+                affected_payers: formData.get('affected_payers') ? formData.get('affected_payers').split(',').map(s => s.trim()).filter(Boolean) : [],
+                effective_date: formData.get('effective_date'),
+                status: 'active'
+              });
+              setShowAddPolicy(false);
+              fetchPolicyUpdates();
+            } catch (error) {
+              console.error('Error creating policy:', error);
+            }
+          }}>
+            <div className="space-y-4">
+              <div><Label>Title</Label><Input name="title" required /></div>
+              <div><Label>Description</Label><Input name="description" required /></div>
+              <div>
+                <Label>Type</Label>
+                <select name="policy_type" className="w-full border rounded px-3 py-2 text-sm" required>
+                  <option value="payer_update">Payer Update</option>
+                  <option value="regulatory">Regulatory</option>
+                  <option value="compliance">Compliance</option>
+                  <option value="billing_rule">Billing Rule</option>
+                </select>
+              </div>
+              <div><Label>Affected Services (comma-separated: EV, Prior Auth, Coding, Billing, AR, Payment Posting)</Label><Input name="affected_services" required /></div>
+              <div><Label>Affected Payers (comma-separated, optional)</Label><Input name="affected_payers" /></div>
+              <div><Label>Effective Date</Label><Input name="effective_date" type="date" /></div>
+            </div>
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" onClick={() => setShowAddPolicy(false)}>Cancel</Button>
+              <Button type="submit" className="bg-[#1B4F72] hover:bg-[#154360]">Create Policy Update</Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   ArrowLeft, Building2, User, Calendar, Phone, Mail, AlertTriangle,
   TrendingUp, TrendingDown, Users, MessageSquare, FileText, Bell,
-  CheckCircle2, Clock, BarChart3, Plus, Edit2, Network, Download
+  CheckCircle2, Clock, BarChart3, Plus, Edit2, Network, Download, Sparkles
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -15,6 +15,8 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useAuth } from '../App';
+import { WeeklySummary } from '../components/WeeklySummary';
+import { EmailCadences } from '../components/EmailCadences';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -334,6 +336,8 @@ const ClientDetailPage = () => {
           <TabsTrigger value="performance" data-testid="tab-performance">Performance</TabsTrigger>
           <TabsTrigger value="alerts" data-testid="tab-alerts">Alerts</TabsTrigger>
           <TabsTrigger value="followups" data-testid="tab-followups">Follow-Ups</TabsTrigger>
+          <TabsTrigger value="summary" data-testid="tab-summary">Weekly Summary</TabsTrigger>
+          <TabsTrigger value="cadences" data-testid="tab-cadences">Email Cadences</TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -403,6 +407,40 @@ const ClientDetailPage = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* Innovation Briefing Status */}
+          <Card className="bg-white border border-slate-200 shadow-sm mt-4">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-slate-900 flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-[#1B4F72]" />
+                    Innovation Briefing
+                  </h4>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {client?.last_innovation_briefing 
+                      ? `Last briefed: ${new Date(client.last_innovation_briefing).toLocaleDateString()}`
+                      : <span className="text-amber-600 font-medium">Never briefed</span>
+                    }
+                  </p>
+                </div>
+                <Button
+                  onClick={async () => {
+                    try {
+                      await axios.post(`${API}/clients/${clientId}/mark-innovation-briefed`);
+                      fetchClientData();
+                    } catch (error) {
+                      console.error('Error marking innovation briefed:', error);
+                    }
+                  }}
+                  className="bg-[#1B4F72] hover:bg-[#154360]"
+                  size="sm"
+                >
+                  Mark as Briefed
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Contacts/Org Chart Tab */}
@@ -723,6 +761,37 @@ const ClientDetailPage = () => {
               </Card>
             </>
           )}
+
+          {/* Team Productivity */}
+          {performance.length > 0 && performance[0].claims_processed && (
+            <Card className="bg-white border border-slate-200 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-lg">Team Productivity</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center p-3 bg-slate-50 rounded-lg">
+                    <p className="text-2xl font-bold text-[#1B4F72]">{performance[0].claims_processed?.toLocaleString()}</p>
+                    <p className="text-sm text-slate-500">Claims Processed</p>
+                  </div>
+                  <div className="text-center p-3 bg-slate-50 rounded-lg">
+                    <p className="text-2xl font-bold text-[#1B4F72]">{performance[0].avg_turnaround_days}</p>
+                    <p className="text-sm text-slate-500">Avg Turnaround (days)</p>
+                  </div>
+                  <div className="text-center p-3 bg-slate-50 rounded-lg">
+                    <p className="text-2xl font-bold text-[#1B4F72]">{performance[0].team_size}</p>
+                    <p className="text-sm text-slate-500">Team Size</p>
+                  </div>
+                  <div className="text-center p-3 bg-slate-50 rounded-lg">
+                    <p className="text-2xl font-bold text-[#1B4F72]">
+                      {performance[0].team_size ? Math.round(performance[0].claims_processed / performance[0].team_size) : 'N/A'}
+                    </p>
+                    <p className="text-sm text-slate-500">Claims per Person</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* Alerts Tab */}
@@ -803,6 +872,16 @@ const ClientDetailPage = () => {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Weekly Summary Tab */}
+        <TabsContent value="summary" className="mt-6">
+          <WeeklySummary clientId={clientId} clientName={client?.name} />
+        </TabsContent>
+
+        {/* Email Cadences Tab */}
+        <TabsContent value="cadences" className="mt-6">
+          <EmailCadences clientId={clientId} clientName={client?.name} />
         </TabsContent>
       </Tabs>
 

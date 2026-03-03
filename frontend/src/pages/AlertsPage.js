@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { 
   AlertTriangle, Filter, Check, Clock, ArrowUpRight, Bell,
-  ChevronDown, X, RefreshCw
+  ChevronDown, X, RefreshCw, Sparkles, FileText, AlertOctagon, UserPlus, TrendingDown
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -26,7 +26,7 @@ const AlertsPage = () => {
   const [filters, setFilters] = useState({
     status: 'active',
     severity: 'all',
-    type: 'all'
+    type: ''
   });
   
   // Action dialogs
@@ -36,6 +36,19 @@ const AlertsPage = () => {
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [snoozeDays, setSnoozeDays] = useState(1);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Alert type configuration
+  const alertTypeConfig = {
+    engagement_gap: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
+    renewal: { icon: Bell, color: 'text-blue-600', bg: 'bg-blue-50' },
+    performance_decline: { icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
+    followup_overdue: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
+    innovation_update_due: { icon: Sparkles, color: 'text-blue-600', bg: 'bg-blue-50' },
+    policy_update: { icon: FileText, color: 'text-amber-600', bg: 'bg-amber-50' },
+    frustration: { icon: AlertOctagon, color: 'text-red-600', bg: 'bg-red-50' },
+    scope_creep: { icon: ArrowUpRight, color: 'text-amber-600', bg: 'bg-amber-50' },
+    new_stakeholder: { icon: UserPlus, color: 'text-blue-600', bg: 'bg-blue-50' },
+  };
 
   useEffect(() => {
     fetchAlerts();
@@ -65,7 +78,7 @@ const AlertsPage = () => {
     if (filters.severity !== 'all') {
       filtered = filtered.filter(a => a.severity === filters.severity);
     }
-    if (filters.type !== 'all') {
+    if (filters.type && filters.type !== 'all') {
       filtered = filtered.filter(a => a.alert_type === filters.type);
     }
     
@@ -325,6 +338,8 @@ const AlertsPage = () => {
         ) : (
           filteredAlerts.map((alert) => {
             const styles = getSeverityStyles(alert.severity);
+            const typeConfig = alertTypeConfig[alert.alert_type] || { icon: AlertTriangle, color: 'text-slate-600', bg: 'bg-slate-50' };
+            const TypeIcon = typeConfig.icon;
             return (
               <Card 
                 key={alert.id}
@@ -333,12 +348,15 @@ const AlertsPage = () => {
               >
                 <CardContent className="py-4">
                   <div className="flex items-start gap-4">
-                    <AlertTriangle className={`h-5 w-5 mt-1 flex-shrink-0 ${styles.icon}`} />
+                    <TypeIcon className={`h-5 w-5 mt-1 flex-shrink-0 ${typeConfig.color}`} />
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-2">
                         <Badge className={styles.badge}>{alert.severity}</Badge>
-                        <Badge variant="outline">{alert.alert_type.replace(/_/g, ' ')}</Badge>
+                        <Badge variant="outline" className={`${typeConfig.bg} ${typeConfig.color} border-0`}>
+                          <TypeIcon className="h-3 w-3 mr-1" />
+                          {alert.alert_type.replace(/_/g, ' ')}
+                        </Badge>
                         <Badge className={getStatusBadge(alert.status)}>{alert.status}</Badge>
                       </div>
                       

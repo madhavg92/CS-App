@@ -977,7 +977,10 @@ async def upload_ops_data(file: UploadFile = File(...), user: dict = Depends(req
                     sla_compliance_pct=float(row['sla_compliance']),
                     error_rate=float(row['error_rate']),
                     top_denial_codes=top_denial_codes,
-                    payer_breakdown=payer_breakdown
+                    payer_breakdown=payer_breakdown,
+                    claims_processed=int(float(row['claims_processed'])) if row.get('claims_processed') else None,
+                    avg_turnaround_days=float(row['avg_turnaround_days']) if row.get('avg_turnaround_days') else None,
+                    team_size=int(float(row['team_size'])) if row.get('team_size') else None
                 )
                 
                 await db.performance_records.insert_one(record.model_dump())
@@ -1273,6 +1276,7 @@ async def update_followup(followup_id: str, status: Optional[str] = None, owner:
         if result.modified_count == 0:
             raise HTTPException(status_code=404, detail="Follow-up not found")
     
+    await log_audit(user['id'], user['name'], 'alert_action', 'followup', followup_id, {'status': status, 'owner': owner})
     return {"message": "Follow-up updated"}
 
 @api_router.post("/followups/{followup_id}/generate-draft")
@@ -2388,6 +2392,46 @@ Create an internal email that:
 
 Format as JSON with subject, body, recommended_actions, and suggested_attendees.""",
                 parameters=["client_id", "trigger_reason", "alert_details"]
+            ),
+            PromptTemplate(
+                name="Innovation Update Brief",
+                slug="innovation_update",
+                description="Generate client-specific innovation update about recent Anka product improvements",
+                system_prompt="You are a healthcare technology product specialist at Anka Healthcare. Generate clear, concise innovation updates highlighting how recent product improvements benefit this specific client.",
+                user_prompt_template="""Generate an innovation update email for {client_data[name]}.
+
+Contracted Services: {client_data[contracted_services]}
+Recent Performance: {client_data[recent_performance]}
+
+Highlight 2-3 recent Anka product improvements relevant to their services. For each:
+1. What changed
+2. How it benefits this client
+3. Expected metric impact
+
+Format as JSON with subject, body.""",
+                parameters=["client_id"]
+            ),
+            PromptTemplate(
+                name="Policy Impact Brief",
+                slug="policy_impact_brief",
+                description="Generate client-specific impact analysis for a policy change",
+                system_prompt="You are a healthcare policy analyst at Anka Healthcare. Generate clear, actionable policy impact briefs.",
+                user_prompt_template="""Generate a policy impact brief for {client_data[name]}.
+
+Policy: {policy_title}
+Description: {policy_description}
+Affected Services: {policy_affected_services}
+Effective Date: {policy_effective_date}
+Client Contracted Services: {client_data[contracted_services]}
+
+Provide:
+1. Summary of the policy change (2-3 sentences)
+2. Specific impact on this client
+3. Recommended actions
+4. Timeline
+
+Format as JSON with subject, body, recommended_actions.""",
+                parameters=["client_id", "policy_id"]
             )
         ]
         
@@ -2660,6 +2704,104 @@ async def scheduled_alert_checks():
                             await db.alerts.insert_one(alert.model_dump())
                             innovation_alerts += 1
                 logger.info(f"Created {innovation_alerts} innovation update due alerts")
+                
+                # Policy update alerts (auto-check recent policies)
+                seven_days_ago = now - timedelta(days=7)
+                recent_policies = await db.policy_updates.find({
+                    "status": "active",
+                    "created_at": {"$gte": seven_days_ago.isoformat()}
+                }, {"_id": 0}).to_list(100)
+                
+                policy_alerts_created = 0
+                for policy in recent_policies:
+                    policy_services = set(policy.get('affected_services', []))
+                    for client in clients:
+                        client_services = set(client.get('contracted_services', []))
+                        overlapping = client_services.intersection(policy_services)
+                        if overlapping:
+                            existing = await db.alerts.find_one({
+                                "client_id": client['id'],
+                                "alert_type": "policy_update",
+                                "trigger_data.policy_id": policy['id'],
+                                "status": {"$in": ["active", "acknowledged"]}
+                            }, {"_id": 0})
+                            if not existing:
+                                alert = Alert(
+                                    client_id=client['id'],
+                                    client_name=client['name'],
+                                    alert_type="policy_update",
+                                    severity="medium",
+                                    title=f"Policy update: {policy['title']} affects {client['name']}",
+                                    description=policy.get('description', ''),
+                                    trigger_data={"policy_id": policy['id'], "matching_services": list(overlapping)}
+                                )
+                                await db.alerts.insert_one(alert.model_dump())
+                                policy_alerts_created += 1
+                logger.info(f"Created {policy_alerts_created} policy update alerts")
+                
+                # Email cadence auto-execution
+                cadences = await db.email_cadences.find({"status": "active"}, {"_id": 0}).to_list(1000)
+                cadences_triggered = 0
+                for cadence in cadences:
+                    next_trigger = cadence.get('next_trigger')
+                    if next_trigger:
+                        try:
+                            trigger_dt = datetime.fromisoformat(next_trigger.replace('Z', '+00:00'))
+                            if trigger_dt.tzinfo is None:
+                                trigger_dt = trigger_dt.replace(tzinfo=timezone.utc)
+                            if trigger_dt > now:
+                                continue
+                        except:
+                            pass
+                    
+                    client = await db.clients.find_one({"id": cadence['client_id']}, {"_id": 0})
+                    if not client:
+                        continue
+                    
+                    template_slug = cadence.get('template_slug', 'engagement_outreach')
+                    template = await db.prompt_templates.find_one({"slug": template_slug}, {"_id": 0})
+                    if not template:
+                        continue
+                    
+                    try:
+                        performance = await db.performance_records.find({"client_id": cadence['client_id']}).sort("period_end", -1).limit(3).to_list(3)
+                        contacts = await db.client_contacts.find({"client_id": cadence['client_id']}, {"_id": 0}).to_list(100)
+                        
+                        client_data = {
+                            "name": client.get("name", ""),
+                            "contracted_services": client.get("contracted_services", []),
+                            "health_score": client.get("health_score", "N/A"),
+                            "recent_performance": json.dumps(performance[:1], default=str),
+                            "contacts": json.dumps([{"name": c.get("name"), "role": c.get("role_type")} for c in contacts[:5]], default=str),
+                        }
+                        
+                        prompt = template.get("user_prompt_template", "").format(client_data=client_data)
+                        scrubbed, _ = scrub_phi(prompt, f"cadence_{cadence['id']}")
+                        response = await generate_with_ai(scrubbed, template.get("system_prompt", ""))
+                        
+                        comm = Communication(
+                            client_id=cadence['client_id'],
+                            client_name=cadence.get('client_name', client.get('name', '')),
+                            channel="email",
+                            direction="outbound",
+                            subject=f"Auto-generated: {cadence.get('cadence_type', 'check-in')} for {client.get('name', '')}",
+                            body=response,
+                            status="draft",
+                            ai_generated=True,
+                            created_by="system"
+                        )
+                        await db.communications.insert_one(comm.model_dump())
+                        
+                        next_dt = now + timedelta(days=cadence.get('frequency_days', 30))
+                        await db.email_cadences.update_one({"id": cadence['id']}, {"$set": {
+                            "last_triggered": now.isoformat(),
+                            "next_trigger": next_dt.isoformat()
+                        }})
+                        cadences_triggered += 1
+                    except Exception as ce:
+                        logger.error(f"Error executing cadence {cadence['id']}: {ce}")
+                
+                logger.info(f"Triggered {cadences_triggered} email cadences")
             
             logger.info("Scheduled alert checks completed")
         except Exception as e:

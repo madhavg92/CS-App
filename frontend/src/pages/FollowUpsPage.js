@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { 
   Phone, Mail, Clock, Check, ArrowUpRight, Sparkles, Filter,
-  ListTodo, AlertCircle
+  ListTodo, AlertCircle, CheckCircle
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -228,8 +228,9 @@ const FollowUpsPage = () => {
         {filteredFollowups.length === 0 ? (
           <Card className="bg-white">
             <CardContent className="py-12 text-center">
-              <ListTodo className="h-12 w-12 mx-auto text-slate-300 mb-3" />
-              <p className="text-slate-500">No follow-ups match your filters</p>
+              <CheckCircle className="h-12 w-12 mx-auto text-green-400 mb-3" />
+              <p className="text-slate-600 font-medium">All caught up!</p>
+              <p className="text-sm text-slate-400 mt-1">No follow-ups match your current filters</p>
             </CardContent>
           </Card>
         ) : (
