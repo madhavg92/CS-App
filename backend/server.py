@@ -90,6 +90,7 @@ class ClientAccount(BaseModel):
     assigned_cs_lead: Optional[str] = None
     health_score: int = 80  # Computed field
     last_contact_date: Optional[str] = None
+    last_innovation_briefing: Optional[str] = None  # ISO date string for innovation update tracking
     notes: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -102,6 +103,7 @@ class ClientAccountCreate(BaseModel):
     sla_targets: Dict[str, Any] = {}
     assigned_csm: Optional[str] = None
     assigned_cs_lead: Optional[str] = None
+    last_innovation_briefing: Optional[str] = None
 
 # Client Contact Model
 class ClientContact(BaseModel):
@@ -143,6 +145,9 @@ class PerformanceRecord(BaseModel):
     error_rate: float
     top_denial_codes: Dict[str, int] = {}  # {"CO-4": 150, "PR-1": 89}
     payer_breakdown: Dict[str, float] = {}  # {"Medicare": 45000, "Medicaid": 23000}
+    claims_processed: Optional[int] = None  # Team productivity
+    avg_turnaround_days: Optional[float] = None  # Team productivity
+    team_size: Optional[int] = None  # Team productivity
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class PerformanceRecordCreate(BaseModel):
@@ -156,6 +161,9 @@ class PerformanceRecordCreate(BaseModel):
     error_rate: float
     top_denial_codes: Dict[str, int] = {}
     payer_breakdown: Dict[str, float] = {}
+    claims_processed: Optional[int] = None
+    avg_turnaround_days: Optional[float] = None
+    team_size: Optional[int] = None
 
 # Alert Model
 class Alert(BaseModel):
@@ -386,6 +394,37 @@ class IntegrationConfig(BaseModel):
     connection_status: str = "disconnected"  # connected, disconnected, error
     config: Dict[str, Any] = {}
     last_sync: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# Policy Update Model (for policy alert system)
+class PolicyUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    description: str
+    policy_type: str  # payer_update, regulatory, compliance, billing_rule
+    affected_services: List[str] = []  # EV, Prior Auth, Coding, Billing, AR, Payment Posting
+    affected_payers: List[str] = []  # Medicare, Medicaid, BCBS, United, Aetna, Cigna
+    effective_date: Optional[str] = None
+    source_url: Optional[str] = None
+    status: str = "active"  # active, archived
+    created_by: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# Email Cadence Model
+class EmailCadence(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    cadence_type: str  # monthly_checkin, qbr_scheduling, renewal_reminder, open_items_followup
+    frequency_days: int = 30
+    auto_send: bool = False
+    status: str = "active"  # active, paused
+    last_triggered: Optional[str] = None
+    next_trigger: Optional[str] = None
+    template_slug: str = "engagement_outreach"
+    created_by: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 # =============================================================================
@@ -852,7 +891,7 @@ async def check_performance_decline_alert(client_id: str, new_record: Performanc
             client_name=client_name,
             alert_type="performance_decline",
             severity="medium",
-            title=f"SLA Compliance Below Target",
+            title="SLA Compliance Below Target",
             description=f"SLA compliance at {new_record.sla_compliance_pct:.1f}% vs target of {sla_target}%",
             trigger_data={
                 "current_compliance": new_record.sla_compliance_pct,
@@ -1030,6 +1069,9 @@ async def update_alert(alert_id: str, input: AlertUpdate, user: dict = Depends(r
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Alert not found")
     
+    # Audit log for alert action
+    await log_audit(user['id'], user['name'], 'alert_action', 'alert', alert_id, {'action': update_data.get('status'), 'notes': update_data.get('resolution_notes')})
+    
     return {"message": "Alert updated"}
 
 @api_router.post("/alerts/{alert_id}/snooze")
@@ -1041,6 +1083,9 @@ async def snooze_alert(alert_id: str, days: int = 1, user: dict = Depends(requir
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Alert not found")
+    
+    # Audit log for snooze
+    await log_audit(user['id'], user['name'], 'alert_action', 'alert', alert_id, {'action': 'snoozed', 'days': days})
     
     return {"message": f"Alert snoozed for {days} day(s)", "snoozed_until": snooze_until}
 
@@ -1058,6 +1103,9 @@ async def escalate_alert(alert_id: str, escalate_to: str, notes: str, user: dict
             "trigger_data": {**alert.get('trigger_data', {}), "escalation_notes": notes, "escalated_by": user['name']}
         }}
     )
+    
+    # Audit log for escalation
+    await log_audit(user['id'], user['name'], 'alert_action', 'alert', alert_id, {'action': 'escalate', 'escalated_to': escalate_to})
     
     return {"message": "Alert escalated"}
 
@@ -1119,6 +1167,9 @@ async def create_communication(input: CommunicationCreate, user: dict = Depends(
             {"$set": {date_field: datetime.now(timezone.utc).isoformat()}}
         )
     
+    # Audit log
+    await log_audit(user['id'], user['name'], 'communication_send', 'communication', comm.id, {'channel': comm.channel, 'ai_generated': comm.ai_generated})
+    
     return comm
 
 @api_router.patch("/communications/{comm_id}/send")
@@ -1129,6 +1180,9 @@ async def send_communication(comm_id: str, user: dict = Depends(require_role(["c
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Communication not found")
+    
+    # Audit log
+    await log_audit(user['id'], user['name'], 'communication_send', 'communication', comm_id, {'action': 'sent'})
     
     return {"message": "Communication sent"}
 
@@ -1319,6 +1373,9 @@ async def execute_template(slug: str, params: Dict[str, Any], user: dict = Depen
     
     # Generate
     response = await generate_with_ai(scrubbed_prompt, template['system_prompt'])
+    
+    # Audit log
+    await log_audit(user['id'], user['name'], 'ai_generation', 'template', slug, {'client_id': params.get('client_id')})
     
     return {"template": slug, "result": response}
 
@@ -1656,6 +1713,201 @@ async def get_audit_logs(
     return logs
 
 # =============================================================================
+# INNOVATION BRIEFING
+# =============================================================================
+
+@api_router.post("/clients/{client_id}/mark-innovation-briefed")
+async def mark_innovation_briefed(client_id: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Mark a client as having received an innovation briefing"""
+    result = await db.clients.update_one(
+        {"id": client_id},
+        {"$set": {"last_innovation_briefing": datetime.now(timezone.utc).isoformat()}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    await log_audit(user['id'], user['name'], 'alert_action', 'client', client_id, {'action': 'innovation_briefed'})
+    return {"message": "Client marked as innovation briefed"}
+
+# =============================================================================
+# POLICY UPDATES
+# =============================================================================
+
+@api_router.get("/policy-updates")
+async def get_policy_updates(user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Get all policy updates"""
+    updates = await db.policy_updates.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return updates
+
+@api_router.post("/policy-updates")
+async def create_policy_update(input: PolicyUpdate, user: dict = Depends(require_role(["cs_lead"]))):
+    """Create a new policy update"""
+    input.created_by = user['id']
+    await db.policy_updates.insert_one(input.model_dump())
+    return input
+
+@api_router.patch("/policy-updates/{policy_id}")
+async def update_policy(policy_id: str, updates: Dict[str, Any], user: dict = Depends(require_role(["cs_lead"]))):
+    """Update a policy update"""
+    result = await db.policy_updates.update_one({"id": policy_id}, {"$set": updates})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Policy update not found")
+    return {"message": "Policy updated"}
+
+@api_router.delete("/policy-updates/{policy_id}")
+async def delete_policy(policy_id: str, user: dict = Depends(require_role(["cs_lead"]))):
+    """Delete a policy update"""
+    result = await db.policy_updates.delete_one({"id": policy_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Policy update not found")
+    return {"message": "Policy deleted"}
+
+@api_router.post("/policy-updates/{policy_id}/generate-alerts")
+async def generate_policy_alerts(policy_id: str, user: dict = Depends(require_role(["cs_lead"]))):
+    """Generate alerts for all clients affected by a policy update"""
+    policy = await db.policy_updates.find_one({"id": policy_id}, {"_id": 0})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy update not found")
+    
+    clients = await db.clients.find({"status": "active"}, {"_id": 0}).to_list(1000)
+    alerts_created = 0
+    
+    for client in clients:
+        # Check for service overlap
+        client_services = set(client.get('contracted_services', []))
+        policy_services = set(policy.get('affected_services', []))
+        overlapping = client_services.intersection(policy_services)
+        
+        if overlapping:
+            # Check for existing alert
+            existing = await db.alerts.find_one({
+                "client_id": client['id'],
+                "alert_type": "policy_update",
+                "trigger_data.policy_id": policy_id,
+                "status": {"$in": ["active", "acknowledged"]}
+            }, {"_id": 0})
+            
+            if not existing:
+                alert = Alert(
+                    client_id=client['id'],
+                    client_name=client['name'],
+                    alert_type="policy_update",
+                    severity="medium",
+                    title=f"Policy update: {policy['title']} affects {client['name']}",
+                    description=policy['description'],
+                    trigger_data={"policy_id": policy_id, "matching_services": list(overlapping)}
+                )
+                await db.alerts.insert_one(alert.model_dump())
+                alerts_created += 1
+    
+    return {"message": f"Generated {alerts_created} alerts", "alerts_created": alerts_created}
+
+# =============================================================================
+# EMAIL CADENCES
+# =============================================================================
+
+@api_router.get("/email-cadences")
+async def get_email_cadences(client_id: Optional[str] = None, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Get email cadences, optionally filtered by client"""
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    cadences = await db.email_cadences.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return cadences
+
+@api_router.post("/email-cadences")
+async def create_email_cadence(input: EmailCadence, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Create a new email cadence"""
+    input.created_by = user['id']
+    input.next_trigger = (datetime.now(timezone.utc) + timedelta(days=input.frequency_days)).isoformat()
+    await db.email_cadences.insert_one(input.model_dump())
+    return input
+
+@api_router.patch("/email-cadences/{cadence_id}")
+async def update_email_cadence(cadence_id: str, status: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Update email cadence status"""
+    result = await db.email_cadences.update_one({"id": cadence_id}, {"$set": {"status": status}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Cadence not found")
+    return {"message": "Cadence updated"}
+
+@api_router.delete("/email-cadences/{cadence_id}")
+async def delete_email_cadence(cadence_id: str, user: dict = Depends(require_role(["cs_lead"]))):
+    """Delete an email cadence"""
+    result = await db.email_cadences.delete_one({"id": cadence_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Cadence not found")
+    return {"message": "Cadence deleted"}
+
+@api_router.post("/email-cadences/{cadence_id}/send")
+async def trigger_email_cadence(cadence_id: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Manually trigger an email cadence"""
+    cadence = await db.email_cadences.find_one({"id": cadence_id}, {"_id": 0})
+    if not cadence:
+        raise HTTPException(status_code=404, detail="Cadence not found")
+    
+    # Get client data
+    client = await db.clients.find_one({"id": cadence['client_id']}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Update cadence timestamps
+    now = datetime.now(timezone.utc)
+    await db.email_cadences.update_one({"id": cadence_id}, {"$set": {
+        "last_triggered": now.isoformat(),
+        "next_trigger": (now + timedelta(days=cadence['frequency_days'])).isoformat()
+    }})
+    
+    return {"message": "Cadence triggered", "client": client['name']}
+
+# =============================================================================
+# WEEKLY SUMMARY ENDPOINT
+# =============================================================================
+
+@api_router.post("/weekly-summary")
+async def generate_weekly_summary(data: Dict[str, Any], user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Generate AI-powered weekly summary for a client"""
+    client_id = data.get('client_id')
+    week_ending = data.get('week_ending')
+    
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Gather context
+    performance = await db.performance_records.find({"client_id": client_id}).sort("period_end", -1).limit(3).to_list(3)
+    comms = await db.communications.find({"client_id": client_id}).sort("created_at", -1).limit(20).to_list(20)
+    alerts = await db.alerts.find({"client_id": client_id, "status": {"$in": ["active", "acknowledged"]}}).to_list(50)
+    followups = await db.followups.find({"client_id": client_id, "status": "open"}).to_list(50)
+    
+    prompt = f'''Generate a weekly client summary for {client['name']} for the week ending {week_ending}.
+
+Performance Data: {json.dumps([{k:v for k,v in p.items() if k != '_id'} for p in performance], default=str)}
+Recent Communications ({len(comms)} this period): {json.dumps([{'subject': c.get('subject'), 'channel': c.get('channel'), 'date': c.get('created_at')} for c in comms], default=str)}
+Active Alerts: {json.dumps([{'title': a.get('title'), 'severity': a.get('severity'), 'type': a.get('alert_type')} for a in alerts], default=str)}
+Open Follow-ups: {json.dumps([{'title': f.get('title'), 'priority_level': f.get('priority_level'), 'days_open': f.get('days_open', 0)} for f in followups], default=str)}
+
+Respond ONLY with valid JSON (no markdown, no backticks):
+{{"key_topics": ["topic1", "topic2"],
+ "action_items": [{{"item": "description", "owner": "name", "priority": "high/medium/low"}}],
+ "red_flags": ["flag1", "flag2"],
+ "new_contacts": ["contact info if detected"],
+ "escalation_items": []}}'''
+    
+    scrubbed, _ = scrub_phi(prompt, 'weekly_summary')
+    response = await generate_with_ai(scrubbed)
+    
+    # Parse JSON response
+    try:
+        clean = response.replace('```json', '').replace('```', '').strip()
+        result = json.loads(clean)
+    except:
+        result = {'key_topics': ['Summary generation completed'], 'action_items': [], 'red_flags': [], 'new_contacts': [], 'escalation_items': []}
+    
+    await log_audit(user['id'], user['name'], 'ai_generation', 'weekly_summary', client_id, {'week_ending': week_ending})
+    return result
+
+# =============================================================================
 # SCHEDULED REVIEWS (Calendar)
 # =============================================================================
 
@@ -1862,7 +2114,7 @@ Health Score: {client.get('health_score', 80)}
 Write a concise executive summary (2-3 paragraphs) suitable for a {'client-facing' if report_type == 'external' else 'internal team'} document."""
         
         ai_narrative = await generate_with_ai(ai_prompt)
-    except Exception as e:
+    except Exception:
         ai_narrative = f"Performance report for {client['name']}. Please review the metrics below for detailed analysis."
     
     # Create document
@@ -2350,8 +2602,64 @@ async def scheduled_alert_checks():
                             )
                             await db.alerts.insert_one(alert.model_dump())
                             renewal_alerts += 1
+                            
+                            # Auto-create QBR scheduling follow-up when 60-day renewal fires
+                            if days_until <= 65 and days_until >= 55:
+                                existing_qbr = await db.followups.find_one({
+                                    "client_id": client['id'],
+                                    "title": {"$regex": "QBR", "$options": "i"},
+                                    "status": "open"
+                                }, {"_id": 0})
+                                if not existing_qbr:
+                                    qbr_followup = FollowUpItem(
+                                        client_id=client['id'],
+                                        client_name=client['name'],
+                                        title=f"Schedule QBR for {client['name']} - Renewal in {days_until} days",
+                                        description=f"Contract expires {client['contract_end']}. Schedule QBR 3-4 weeks before renewal to review performance and discuss terms.",
+                                        priority_level=4,
+                                        action_type="call_required",
+                                        assigned_to=client.get('assigned_csm'),
+                                        source="system_generated"
+                                    )
+                                    await db.followups.insert_one(qbr_followup.model_dump())
+                                    logger.info(f"Auto-created QBR follow-up for {client['name']}")
                 
                 logger.info(f"Created {renewal_alerts} renewal alerts")
+                
+                # Innovation update due alerts
+                innovation_alerts = 0
+                for client in clients:
+                    last_briefing = client.get('last_innovation_briefing')
+                    if last_briefing:
+                        try:
+                            briefing_date = datetime.fromisoformat(last_briefing.replace('Z', '+00:00'))
+                            if briefing_date.tzinfo is None:
+                                briefing_date = briefing_date.replace(tzinfo=timezone.utc)
+                            days_since = (now - briefing_date).days
+                        except:
+                            days_since = 999
+                    else:
+                        days_since = 999  # Never briefed
+                    
+                    if days_since > 60:
+                        existing = await db.alerts.find_one({
+                            "client_id": client['id'],
+                            "alert_type": "innovation_update_due",
+                            "status": {"$in": ["active", "acknowledged"]}
+                        }, {"_id": 0})
+                        if not existing:
+                            alert = Alert(
+                                client_id=client['id'],
+                                client_name=client['name'],
+                                alert_type="innovation_update_due",
+                                severity="low",
+                                title=f"Innovation update due for {client['name']} ({days_since} days since last briefing)",
+                                description=f"Client has not been briefed on Anka product innovations in {days_since} days.",
+                                trigger_data={"days_since_briefing": days_since, "last_briefing": last_briefing}
+                            )
+                            await db.alerts.insert_one(alert.model_dump())
+                            innovation_alerts += 1
+                logger.info(f"Created {innovation_alerts} innovation update due alerts")
             
             logger.info("Scheduled alert checks completed")
         except Exception as e:

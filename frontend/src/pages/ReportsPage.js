@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   FileText, Download, Calendar, TrendingUp, BarChart3, PieChart,
-  Building2, Sparkles, Clock
+  Building2, Sparkles, Clock, FileDown
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -12,16 +12,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { useAuth } from '../App';
+import {
+  LineChart, Line, BarChart, Bar, PieChart as RechartsPie, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+const COLORS = ['#1B4F72', '#85C1E9', '#27AE60', '#F39C12', '#E74C3C', '#9B59B6'];
 
 const ReportsPage = () => {
   const { user } = useAuth();
   const [clients, setClients] = useState([]);
   const [performance, setPerformance] = useState([]);
+  const [clientPerformance, setClientPerformance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportingBoth, setExportingBoth] = useState(false);
+  const [exportProgress, setExportProgress] = useState('');
   
   // Report generation
   const [selectedClient, setSelectedClient] = useState('');
@@ -32,6 +41,14 @@ const ReportsPage = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (selectedClient) {
+      fetchClientPerformance();
+    } else {
+      setClientPerformance([]);
+    }
+  }, [selectedClient]);
 
   const fetchData = async () => {
     try {
@@ -45,6 +62,84 @@ const ReportsPage = () => {
       console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchClientPerformance = async () => {
+    try {
+      const response = await axios.get(`${API}/performance?client_id=${selectedClient}`);
+      setClientPerformance(response.data.slice(0, 8));
+    } catch (error) {
+      console.error('Error fetching client performance:', error);
+    }
+  };
+
+  const handleExportDocx = async () => {
+    if (!generatedReport || !selectedClient) return;
+    setExporting(true);
+    try {
+      const response = await axios.post(
+        `${API}/reports/generate-docx?client_id=${selectedClient}&report_type=${generatedReport.type}`,
+        {},
+        { responseType: 'blob' }
+      );
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `anka_report_${generatedReport.type}_${new Date().toISOString().slice(0,10)}.docx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Failed to export report');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDownloadBoth = async () => {
+    if (!selectedClient) return;
+    setExportingBoth(true);
+    try {
+      setExportProgress('Generating internal report...');
+      const internalRes = await axios.post(
+        `${API}/reports/generate-docx?client_id=${selectedClient}&report_type=internal`,
+        {},
+        { responseType: 'blob' }
+      );
+      const internalUrl = window.URL.createObjectURL(new Blob([internalRes.data]));
+      const internalLink = document.createElement('a');
+      internalLink.href = internalUrl;
+      internalLink.setAttribute('download', `anka_report_internal_${new Date().toISOString().slice(0,10)}.docx`);
+      document.body.appendChild(internalLink);
+      internalLink.click();
+      internalLink.remove();
+      window.URL.revokeObjectURL(internalUrl);
+
+      setExportProgress('Generating external report...');
+      const externalRes = await axios.post(
+        `${API}/reports/generate-docx?client_id=${selectedClient}&report_type=external`,
+        {},
+        { responseType: 'blob' }
+      );
+      const externalUrl = window.URL.createObjectURL(new Blob([externalRes.data]));
+      const externalLink = document.createElement('a');
+      externalLink.href = externalUrl;
+      externalLink.setAttribute('download', `anka_report_external_${new Date().toISOString().slice(0,10)}.docx`);
+      document.body.appendChild(externalLink);
+      externalLink.click();
+      externalLink.remove();
+      window.URL.revokeObjectURL(externalUrl);
+
+      setExportProgress('');
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Failed to export reports');
+    } finally {
+      setExportingBoth(false);
+      setExportProgress('');
     }
   };
 
@@ -414,10 +509,24 @@ const ReportsPage = () => {
                         </Badge>
                         <p className="text-sm text-slate-600 mt-1">{generatedReport.client}</p>
                       </div>
-                      <Button variant="outline" size="sm">
-                        <Download className="h-4 w-4 mr-1" />
-                        Export
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={handleExportDocx}
+                          disabled={exporting}
+                          data-testid="export-docx-btn"
+                        >
+                          {exporting ? (
+                            <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#1B4F72]"></span>
+                          ) : (
+                            <>
+                              <Download className="h-4 w-4 mr-1" />
+                              Export .docx
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </div>
                     <div className="p-4 bg-slate-50 rounded-lg border max-h-96 overflow-y-auto">
                       <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans">
@@ -432,7 +541,132 @@ const ReportsPage = () => {
                 ) : (
                   <div className="text-center py-12 text-slate-500">
                     <FileText className="h-12 w-12 mx-auto text-slate-300 mb-3" />
-                    <p>Select options and generate a report</p>
+                    <p>Select a client above to preview analytics and generate reports</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Download Both Button */}
+          {selectedClient && (
+            <div className="mt-6">
+              <Card className="bg-white">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-medium text-slate-900">Bulk Export</h3>
+                      <p className="text-sm text-slate-500">Download both internal and external reports at once</p>
+                    </div>
+                    <Button
+                      className="bg-[#1B4F72] hover:bg-[#154360]"
+                      onClick={handleDownloadBoth}
+                      disabled={exportingBoth}
+                      data-testid="download-both-btn"
+                    >
+                      {exportingBoth ? (
+                        <span className="flex items-center gap-2">
+                          <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
+                          {exportProgress || 'Generating...'}
+                        </span>
+                      ) : (
+                        <>
+                          <FileDown className="h-4 w-4 mr-2" />
+                          Download Both (Internal + External)
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Analytics Preview Section */}
+          <div className="mt-6">
+            <Card className="bg-white">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5 text-[#1B4F72]" />
+                  Analytics Preview
+                </CardTitle>
+                <CardDescription>Performance data visualization for selected client</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!selectedClient ? (
+                  <div className="text-center py-12 text-slate-500">
+                    <BarChart3 className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                    <p>Select a client to preview analytics</p>
+                  </div>
+                ) : clientPerformance.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500">
+                    <BarChart3 className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                    <p>No performance data available for this client</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Recovery Rate Trend */}
+                    <div>
+                      <h4 className="font-medium text-slate-700 mb-3">Recovery Rate Trend</h4>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <LineChart data={clientPerformance.slice().reverse()}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="period_end" tickFormatter={(v) => v?.slice(5,10)} fontSize={10} />
+                          <YAxis domain={[70, 100]} fontSize={10} />
+                          <Tooltip />
+                          <Legend />
+                          <Line type="monotone" dataKey="recovery_rate" stroke="#1B4F72" name="Recovery %" strokeWidth={2} />
+                          <Line type="monotone" dataKey="sla_compliance_pct" stroke="#85C1E9" name="SLA %" strokeWidth={2} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Top Denial Codes */}
+                    <div>
+                      <h4 className="font-medium text-slate-700 mb-3">Top Denial Codes</h4>
+                      {clientPerformance[0]?.top_denial_codes && Object.keys(clientPerformance[0].top_denial_codes).length > 0 ? (
+                        <ResponsiveContainer width="100%" height={200}>
+                          <BarChart data={Object.entries(clientPerformance[0].top_denial_codes).slice(0, 5).map(([code, count]) => ({ code, count }))} layout="vertical">
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis type="number" fontSize={10} />
+                            <YAxis dataKey="code" type="category" width={50} fontSize={10} />
+                            <Tooltip />
+                            <Bar dataKey="count" fill="#1B4F72" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="text-center py-8 text-slate-400">No denial code data</div>
+                      )}
+                    </div>
+
+                    {/* Payer Breakdown */}
+                    <div>
+                      <h4 className="font-medium text-slate-700 mb-3">Payer Breakdown</h4>
+                      {clientPerformance[0]?.payer_breakdown && Object.keys(clientPerformance[0].payer_breakdown).length > 0 ? (
+                        <ResponsiveContainer width="100%" height={200}>
+                          <RechartsPie>
+                            <Pie
+                              data={Object.entries(clientPerformance[0].payer_breakdown).map(([name, value]) => ({ name, value }))}
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={70}
+                              fill="#1B4F72"
+                              dataKey="value"
+                              label={({ name }) => name}
+                              labelLine={false}
+                              fontSize={10}
+                            >
+                              {Object.entries(clientPerformance[0].payer_breakdown).map((_, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => formatCurrency(value)} />
+                          </RechartsPie>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="text-center py-8 text-slate-400">No payer data</div>
+                      )}
+                    </div>
                   </div>
                 )}
               </CardContent>

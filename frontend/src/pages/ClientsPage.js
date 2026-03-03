@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { 
   Search, Plus, Filter, ChevronRight, Building2, User, Calendar,
-  AlertTriangle, TrendingUp, TrendingDown, Minus
+  AlertTriangle, TrendingUp, TrendingDown, Minus, Grid, List
 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -28,6 +28,9 @@ const ClientsPage = () => {
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [users, setUsers] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [viewMode, setViewMode] = useState('list');
+  const [sortBy, setSortBy] = useState('health');
   const [newClient, setNewClient] = useState({
     name: '',
     contract_start: '',
@@ -41,11 +44,12 @@ const ClientsPage = () => {
   useEffect(() => {
     fetchClients();
     fetchUsers();
+    fetchAlerts();
   }, []);
 
   useEffect(() => {
     filterClients();
-  }, [clients, searchQuery, statusFilter]);
+  }, [clients, searchQuery, statusFilter, sortBy]);
 
   const fetchClients = async () => {
     try {
@@ -67,6 +71,19 @@ const ClientsPage = () => {
     }
   };
 
+  const fetchAlerts = async () => {
+    try {
+      const response = await axios.get(`${API}/alerts?status=active`);
+      setAlerts(response.data);
+    } catch (error) {
+      console.error('Error fetching alerts:', error);
+    }
+  };
+
+  const getClientAlertCount = (clientId) => {
+    return alerts.filter(a => a.client_id === clientId).length;
+  };
+
   const filterClients = () => {
     let filtered = [...clients];
     
@@ -80,6 +97,19 @@ const ClientsPage = () => {
     
     if (statusFilter !== 'all') {
       filtered = filtered.filter(c => c.status === statusFilter);
+    }
+
+    // Sort
+    if (sortBy === 'health') {
+      filtered.sort((a, b) => a.health_score - b.health_score);
+    } else if (sortBy === 'alerts') {
+      filtered.sort((a, b) => getClientAlertCount(b.id) - getClientAlertCount(a.id));
+    } else if (sortBy === 'renewal') {
+      filtered.sort((a, b) => {
+        const daysA = getDaysUntilRenewal(a.contract_end) || 9999;
+        const daysB = getDaysUntilRenewal(b.contract_end) || 9999;
+        return daysA - daysB;
+      });
     }
     
     setFilteredClients(filtered);
@@ -185,19 +215,107 @@ const ClientsPage = () => {
             <SelectItem value="churned">Churned</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={sortBy} onValueChange={setSortBy}>
+          <SelectTrigger className="w-full sm:w-48 bg-white" data-testid="sort-by">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="health">Health Score (worst first)</SelectItem>
+            <SelectItem value="alerts">Alert Count</SelectItem>
+            <SelectItem value="renewal">Renewal Date</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="flex gap-1 border rounded-md p-1 bg-white">
+          <Button
+            variant={viewMode === 'list' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setViewMode('list')}
+            className={viewMode === 'list' ? 'bg-[#1B4F72]' : ''}
+            data-testid="view-list"
+          >
+            <List className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={viewMode === 'grid' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setViewMode('grid')}
+            className={viewMode === 'grid' ? 'bg-[#1B4F72]' : ''}
+            data-testid="view-grid"
+          >
+            <Grid className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Client List */}
-      <div className="space-y-3">
-        {filteredClients.length === 0 ? (
-          <Card className="bg-white">
-            <CardContent className="py-12 text-center">
-              <Building2 className="h-12 w-12 mx-auto text-slate-300 mb-3" />
-              <p className="text-slate-500">No clients found</p>
-            </CardContent>
-          </Card>
-        ) : (
-          filteredClients.map((client) => {
+      {filteredClients.length === 0 ? (
+        <Card className="bg-white">
+          <CardContent className="py-12 text-center">
+            <Building2 className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+            <p className="text-slate-500">No clients found</p>
+          </CardContent>
+        </Card>
+      ) : viewMode === 'grid' ? (
+        /* Health Grid View */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredClients.map((client) => {
+            const daysUntilRenewal = getDaysUntilRenewal(client.contract_end);
+            const alertCount = getClientAlertCount(client.id);
+            
+            return (
+              <Card 
+                key={client.id}
+                className="bg-white border-slate-200 hover:shadow-md hover:border-[#85C1E9] transition-all cursor-pointer"
+                onClick={() => navigate(`/clients/${client.id}`)}
+                data-testid={`client-grid-${client.id}`}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <h3 className="font-semibold text-slate-900 truncate">{client.name}</h3>
+                      <Badge className={getStatusBadge(client.status)} size="sm">{client.status}</Badge>
+                    </div>
+                    <div className={`text-3xl font-bold ${
+                      client.health_score >= 80 ? 'text-green-600' :
+                      client.health_score >= 60 ? 'text-amber-600' : 'text-red-600'
+                    }`}>
+                      {client.health_score}
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 text-sm">
+                    {daysUntilRenewal !== null && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Days to Renewal:</span>
+                        <span className={`font-medium ${daysUntilRenewal <= 30 ? 'text-red-600' : daysUntilRenewal <= 60 ? 'text-amber-600' : 'text-slate-700'}`}>
+                          {daysUntilRenewal > 0 ? daysUntilRenewal : 'Expired'}
+                        </span>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Active Alerts:</span>
+                      <Badge className={alertCount > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}>
+                        {alertCount}
+                      </Badge>
+                    </div>
+                    
+                    {client.assigned_csm && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">CSM:</span>
+                        <span className="text-slate-700">{users.find(u => u.id === client.assigned_csm)?.name || '-'}</span>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        /* List View (default) */
+        <div className="space-y-3">
+          {filteredClients.map((client) => {
             const healthBadge = getHealthBadge(client.health_score);
             const daysUntilRenewal = getDaysUntilRenewal(client.contract_end);
             
@@ -272,9 +390,9 @@ const ClientsPage = () => {
                 </CardContent>
               </Card>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
       {/* Add Client Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>

@@ -49,7 +49,7 @@ async def seed_data():
             "id": str(uuid.uuid4()),
             "name": "Gayatri Garg",
             "email": "gayatri.garg@anka.health",
-            "password_hash": hash_password("password123"),
+            "password_hash": hash_password("anka2026!"),
             "role": "cs_lead",
             "assigned_clients": [],
             "is_active": True,
@@ -59,7 +59,7 @@ async def seed_data():
             "id": str(uuid.uuid4()),
             "name": "Gurpreet Sahni",
             "email": "gurpreet.sahni@anka.health",
-            "password_hash": hash_password("password123"),
+            "password_hash": hash_password("anka2026!"),
             "role": "cs_lead",
             "assigned_clients": [],
             "is_active": True,
@@ -69,7 +69,7 @@ async def seed_data():
             "id": str(uuid.uuid4()),
             "name": "Priya Sharma",
             "email": "priya.sharma@anka.health",
-            "password_hash": hash_password("password123"),
+            "password_hash": hash_password("anka2026!"),
             "role": "csm",
             "assigned_clients": [],
             "is_active": True,
@@ -79,7 +79,7 @@ async def seed_data():
             "id": str(uuid.uuid4()),
             "name": "Rahul Verma",
             "email": "rahul.verma@anka.health",
-            "password_hash": hash_password("password123"),
+            "password_hash": hash_password("anka2026!"),
             "role": "csm",
             "assigned_clients": [],
             "is_active": True,
@@ -89,7 +89,7 @@ async def seed_data():
             "id": str(uuid.uuid4()),
             "name": "Ankit Patel",
             "email": "ankit.patel@anka.health",
-            "password_hash": hash_password("password123"),
+            "password_hash": hash_password("anka2026!"),
             "role": "ops",
             "assigned_clients": [],
             "is_active": True,
@@ -538,11 +538,11 @@ async def seed_data():
     print("="*50)
     print("\nLogin credentials:")
     print("  Admin: admin@anka.health / admin123")
-    print("  CS Lead: gayatri.garg@anka.health / password123")
-    print("  CS Lead: gurpreet.sahni@anka.health / password123")
-    print("  CSM: priya.sharma@anka.health / password123")
-    print("  CSM: rahul.verma@anka.health / password123")
-    print("  Ops: ankit.patel@anka.health / password123")
+    print("  CS Lead: gayatri.garg@anka.health / anka2026!")
+    print("  CS Lead: gurpreet.sahni@anka.health / anka2026!")
+    print("  CSM: priya.sharma@anka.health / anka2026!")
+    print("  CSM: rahul.verma@anka.health / anka2026!")
+    print("  Ops: ankit.patel@anka.health / anka2026!")
 
 if __name__ == "__main__":
     asyncio.run(seed_data())

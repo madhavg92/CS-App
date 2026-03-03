@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   Settings as SettingsIcon, Users, Bell, Shield, Save, 
-  UserPlus, Edit2, Check, X
+  UserPlus, Edit2, Check, X, FileText, Clock
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -40,10 +40,25 @@ const SettingsPage = () => {
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'csm' });
   const [editingUser, setEditingUser] = useState(null);
+  
+  // Audit logs
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditFilters, setAuditFilters] = useState({
+    action_type: 'all',
+    start_date: '',
+    end_date: ''
+  });
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchAuditLogs();
+    }
+  }, [activeTab, auditFilters]);
 
   const fetchData = async () => {
     try {
@@ -58,6 +73,55 @@ const SettingsPage = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchAuditLogs = async () => {
+    setAuditLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.append('limit', '100');
+      if (auditFilters.action_type !== 'all') {
+        params.append('action_type', auditFilters.action_type);
+      }
+      if (auditFilters.start_date) {
+        params.append('start_date', auditFilters.start_date);
+      }
+      if (auditFilters.end_date) {
+        params.append('end_date', auditFilters.end_date);
+      }
+      const response = await axios.get(`${API}/audit-logs?${params.toString()}`);
+      setAuditLogs(response.data);
+    } catch (error) {
+      console.error('Error fetching audit logs:', error);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  const getActionTypeBadge = (actionType) => {
+    const styles = {
+      ai_generation: 'bg-purple-100 text-purple-700',
+      report_download: 'bg-blue-100 text-blue-700',
+      alert_action: 'bg-amber-100 text-amber-700',
+      communication_send: 'bg-green-100 text-green-700',
+      data_upload: 'bg-slate-100 text-slate-700'
+    };
+    return styles[actionType] || 'bg-slate-100 text-slate-600';
   };
 
   const handleSaveThresholds = async () => {
@@ -132,6 +196,10 @@ const SettingsPage = () => {
           <TabsTrigger value="users" data-testid="tab-users">
             <Users className="h-4 w-4 mr-2" />
             User Management
+          </TabsTrigger>
+          <TabsTrigger value="audit" data-testid="tab-audit">
+            <FileText className="h-4 w-4 mr-2" />
+            Audit Log
           </TabsTrigger>
         </TabsList>
 
@@ -376,6 +444,109 @@ const SettingsPage = () => {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Audit Log Tab */}
+        <TabsContent value="audit" className="mt-6">
+          <Card className="bg-white">
+            <CardHeader>
+              <CardTitle>Audit Log</CardTitle>
+              <CardDescription>Track system activity and user actions</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Filters */}
+              <div className="flex flex-wrap gap-4 p-4 bg-slate-50 rounded-lg border">
+                <div className="space-y-1">
+                  <Label className="text-xs">Action Type</Label>
+                  <Select 
+                    value={auditFilters.action_type} 
+                    onValueChange={(v) => setAuditFilters({...auditFilters, action_type: v})}
+                  >
+                    <SelectTrigger className="w-40" data-testid="audit-filter-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Actions</SelectItem>
+                      <SelectItem value="ai_generation">AI Generation</SelectItem>
+                      <SelectItem value="report_download">Report Download</SelectItem>
+                      <SelectItem value="alert_action">Alert Action</SelectItem>
+                      <SelectItem value="communication_send">Communication Send</SelectItem>
+                      <SelectItem value="data_upload">Data Upload</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Start Date</Label>
+                  <Input
+                    type="date"
+                    value={auditFilters.start_date}
+                    onChange={(e) => setAuditFilters({...auditFilters, start_date: e.target.value})}
+                    className="w-36"
+                    data-testid="audit-filter-start"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">End Date</Label>
+                  <Input
+                    type="date"
+                    value={auditFilters.end_date}
+                    onChange={(e) => setAuditFilters({...auditFilters, end_date: e.target.value})}
+                    className="w-36"
+                    data-testid="audit-filter-end"
+                  />
+                </div>
+              </div>
+
+              {/* Audit Log Table */}
+              {auditLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1B4F72]"></div>
+                </div>
+              ) : auditLogs.length === 0 ? (
+                <div className="text-center py-12 text-slate-500">
+                  <FileText className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                  <p>No audit logs found</p>
+                  <p className="text-sm mt-1">Actions will appear here as users interact with the system</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-2 font-medium text-slate-600">Timestamp</th>
+                        <th className="text-left py-3 px-2 font-medium text-slate-600">User</th>
+                        <th className="text-left py-3 px-2 font-medium text-slate-600">Action Type</th>
+                        <th className="text-left py-3 px-2 font-medium text-slate-600">Resource</th>
+                        <th className="text-left py-3 px-2 font-medium text-slate-600">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogs.map((log) => (
+                        <tr key={log.id} className="border-b hover:bg-slate-50">
+                          <td className="py-3 px-2 text-slate-600" title={log.timestamp}>
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {formatRelativeTime(log.timestamp)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-2 font-medium text-slate-900">{log.user_name || '-'}</td>
+                          <td className="py-3 px-2">
+                            <Badge className={getActionTypeBadge(log.action_type)}>
+                              {log.action_type?.replace('_', ' ')}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-2 text-slate-600">{log.resource_type}</td>
+                          <td className="py-3 px-2 text-slate-500 text-xs max-w-xs truncate">
+                            {JSON.stringify(log.details)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
