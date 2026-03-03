@@ -20,6 +20,8 @@ import bcrypt
 import asyncio
 from fastapi.responses import StreamingResponse
 import openpyxl
+import msal
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -538,6 +540,29 @@ async def generate_with_ai(prompt: str, system_message: str = "You are a helpful
     except Exception as e:
         logging.error(f"AI generation error: {e}")
         raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+
+async def get_graph_token():
+    """Get Microsoft Graph API access token using client credentials flow"""
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    if not integration or integration.get('connection_status') != 'connected':
+        return None
+    config = integration.get('config', {})
+    tenant_id = config.get('tenant_id')
+    client_id = config.get('client_id')
+    client_secret = config.get('client_secret')
+    if not all([tenant_id, client_id, client_secret]):
+        return None
+    app = msal.ConfidentialClientApplication(
+        client_id,
+        authority=f"https://login.microsoftonline.com/{tenant_id}",
+        client_credential=client_secret
+    )
+    result = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+    if "access_token" in result:
+        return result["access_token"]
+    else:
+        logger.error(f"Graph API token error: {result.get('error_description', 'Unknown error')}")
+        return None
 
 # Health Score Calculator
 async def calculate_health_score(client_id: str) -> int:
@@ -2084,6 +2109,251 @@ async def update_integration_status(integration_name: str, status: str, user: di
         {"$set": {"connection_status": status, "last_sync": datetime.now(timezone.utc).isoformat()}}
     )
     return {"message": "Integration status updated"}
+
+# =============================================================================
+# MICROSOFT 365 INTEGRATION
+# =============================================================================
+
+@api_router.post("/integrations/microsoft-365/configure")
+async def configure_microsoft_365(config: Dict[str, Any], user: dict = Depends(require_role(["cs_lead"]))):
+    required_fields = ["tenant_id", "client_id", "client_secret"]
+    for field in required_fields:
+        if not config.get(field):
+            raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+    update_config = {
+        "tenant_id": config["tenant_id"],
+        "client_id": config["client_id"],
+        "client_secret": config["client_secret"],
+    }
+    if config.get("shared_mailbox"):
+        update_config["shared_mailbox"] = config["shared_mailbox"]
+    await db.integrations.update_one(
+        {"integration_name": "microsoft_365"},
+        {"$set": {"config": update_config, "connection_status": "disconnected"}},
+        upsert=True
+    )
+    await log_audit(user['id'], user['name'], 'integration_config', 'microsoft_365', None, {'action': 'configured'})
+    return {"message": "Microsoft 365 configuration saved. Please test the connection."}
+
+@api_router.post("/integrations/microsoft-365/test")
+async def test_microsoft_365(user: dict = Depends(require_role(["cs_lead"]))):
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    if not integration:
+        raise HTTPException(status_code=404, detail="Microsoft 365 not configured")
+    config = integration.get('config', {})
+    tenant_id = config.get('tenant_id')
+    client_id = config.get('client_id')
+    client_secret = config.get('client_secret')
+    if not all([tenant_id, client_id, client_secret]):
+        raise HTTPException(status_code=400, detail="Incomplete configuration")
+    try:
+        app = msal.ConfidentialClientApplication(
+            client_id,
+            authority=f"https://login.microsoftonline.com/{tenant_id}",
+            client_credential=client_secret
+        )
+        result = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+        if "access_token" not in result:
+            await db.integrations.update_one(
+                {"integration_name": "microsoft_365"},
+                {"$set": {"connection_status": "error", "last_error": result.get("error_description", "Token failed")}}
+            )
+            return {"status": "error", "message": result.get("error_description", "Failed to acquire token")}
+        token = result["access_token"]
+        async with httpx.AsyncClient() as client_http:
+            response = await client_http.get("https://graph.microsoft.com/v1.0/organization", headers={"Authorization": f"Bearer {token}"})
+        if response.status_code == 200:
+            org_data = response.json()
+            org_name = org_data.get("value", [{}])[0].get("displayName", "Unknown")
+            await db.integrations.update_one(
+                {"integration_name": "microsoft_365"},
+                {"$set": {"connection_status": "connected", "last_error": None, "config.org_name": org_name, "config.connected_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            await log_audit(user['id'], user['name'], 'integration_test', 'microsoft_365', None, {'status': 'connected', 'org': org_name})
+            return {"status": "connected", "org_name": org_name}
+        else:
+            error_msg = f"Graph API returned {response.status_code}"
+            await db.integrations.update_one({"integration_name": "microsoft_365"}, {"$set": {"connection_status": "error", "last_error": error_msg}})
+            return {"status": "error", "message": error_msg}
+    except Exception as e:
+        error_msg = str(e)[:200]
+        await db.integrations.update_one({"integration_name": "microsoft_365"}, {"$set": {"connection_status": "error", "last_error": error_msg}})
+        return {"status": "error", "message": error_msg}
+
+@api_router.get("/email/threads")
+async def get_email_threads(client_email: Optional[str] = None, limit: int = 25, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    token = await get_graph_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="Microsoft 365 not connected")
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    shared_mailbox = integration.get('config', {}).get('shared_mailbox')
+    base_url = f"https://graph.microsoft.com/v1.0/users/{shared_mailbox}/messages" if shared_mailbox else "https://graph.microsoft.com/v1.0/me/messages"
+    params = {"$top": limit, "$orderby": "receivedDateTime desc", "$select": "id,conversationId,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments"}
+    if client_email:
+        params["$filter"] = f"from/emailAddress/address eq '{client_email}' or toRecipients/any(r:r/emailAddress/address eq '{client_email}')"
+    try:
+        async with httpx.AsyncClient() as client_http:
+            response = await client_http.get(base_url, headers={"Authorization": f"Bearer {token}"}, params=params)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=f"Graph API error: {response.text[:200]}")
+        messages = response.json().get("value", [])
+        scrubbed_messages = []
+        for msg in messages:
+            scrubbed_preview, _ = scrub_phi(msg.get("bodyPreview", ""), "email_preview")
+            scrubbed_messages.append({
+                "id": msg.get("id"), "conversationId": msg.get("conversationId"), "subject": msg.get("subject"),
+                "from": msg.get("from", {}).get("emailAddress", {}), "receivedDateTime": msg.get("receivedDateTime"),
+                "bodyPreview": scrubbed_preview, "isRead": msg.get("isRead"), "hasAttachments": msg.get("hasAttachments")
+            })
+        return scrubbed_messages
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Graph API: {str(e)[:200]}")
+
+@api_router.get("/email/thread/{conversation_id}")
+async def get_email_thread(conversation_id: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    token = await get_graph_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="Microsoft 365 not connected")
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    shared_mailbox = integration.get('config', {}).get('shared_mailbox')
+    base_url = f"https://graph.microsoft.com/v1.0/users/{shared_mailbox}/messages" if shared_mailbox else "https://graph.microsoft.com/v1.0/me/messages"
+    params = {"$filter": f"conversationId eq '{conversation_id}'", "$orderby": "receivedDateTime asc", "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments"}
+    try:
+        async with httpx.AsyncClient() as client_http:
+            response = await client_http.get(base_url, headers={"Authorization": f"Bearer {token}"}, params=params)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=f"Graph API error: {response.text[:200]}")
+        messages = response.json().get("value", [])
+        scrubbed = []
+        for msg in messages:
+            scrubbed_body, _ = scrub_phi(msg.get("body", {}).get("content", ""), f"email_thread_{conversation_id}")
+            scrubbed.append({
+                "id": msg.get("id"), "subject": msg.get("subject"),
+                "from": msg.get("from", {}).get("emailAddress", {}),
+                "to": [r.get("emailAddress", {}) for r in msg.get("toRecipients", [])],
+                "cc": [r.get("emailAddress", {}) for r in msg.get("ccRecipients", [])],
+                "receivedDateTime": msg.get("receivedDateTime"), "body": scrubbed_body, "hasAttachments": msg.get("hasAttachments")
+            })
+        return scrubbed
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Graph API: {str(e)[:200]}")
+
+@api_router.post("/email/draft-reply")
+async def draft_email_reply(data: Dict[str, Any], user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    conversation_id = data.get("conversation_id")
+    client_id = data.get("client_id")
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id required")
+    token = await get_graph_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="Microsoft 365 not connected")
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    shared_mailbox = integration.get('config', {}).get('shared_mailbox')
+    base_url = f"https://graph.microsoft.com/v1.0/users/{shared_mailbox}/messages" if shared_mailbox else "https://graph.microsoft.com/v1.0/me/messages"
+    async with httpx.AsyncClient() as client_http:
+        response = await client_http.get(base_url, headers={"Authorization": f"Bearer {token}"}, params={"$filter": f"conversationId eq '{conversation_id}'", "$orderby": "receivedDateTime desc", "$top": 5, "$select": "subject,from,receivedDateTime,bodyPreview"})
+    if response.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch thread")
+    thread_messages = response.json().get("value", [])
+    thread_summary = "\n".join([f"From: {m.get('from',{}).get('emailAddress',{}).get('name','')} ({m.get('receivedDateTime','')})\nPreview: {m.get('bodyPreview','')[:200]}" for m in thread_messages])
+    client_context = ""
+    if client_id:
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        if client:
+            performance = await db.performance_records.find({"client_id": client_id}).sort("period_end", -1).limit(1).to_list(1)
+            contacts = await db.client_contacts.find({"client_id": client_id}, {"_id": 0}).to_list(20)
+            if performance:
+                client_context = f"\nClient: {client.get('name','')}\nHealth Score: {client.get('health_score','N/A')}\nServices: {', '.join(client.get('contracted_services',[]))}\nRecovery Rate: {performance[0].get('recovery_rate','N/A')}%\nKey Contacts: {', '.join([c.get('name','') for c in contacts[:5]])}"
+            else:
+                client_context = f"\nClient: {client.get('name','')}\nHealth Score: {client.get('health_score','N/A')}"
+    prompt = f"Draft a professional reply to this email thread.\n\nEmail Thread:\n{thread_summary}\n{f'Client Context:{client_context}' if client_context else ''}\n\nWrite a concise reply under 200 words that addresses key points and references data where relevant. Return ONLY the reply body."
+    scrubbed, _ = scrub_phi(prompt, f"email_reply_{conversation_id}")
+    reply_text = await generate_with_ai(scrubbed, "You are a senior customer success manager at Anka Healthcare. Write professional, data-informed email replies.")
+    await log_audit(user['id'], user['name'], 'ai_generation', 'email_reply', conversation_id, {'client_id': client_id})
+    return {"reply": reply_text, "conversation_id": conversation_id}
+
+@api_router.post("/email/send")
+async def send_email(data: Dict[str, Any], user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    token = await get_graph_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="Microsoft 365 not connected")
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    shared_mailbox = integration.get('config', {}).get('shared_mailbox')
+    message_id = data.get("message_id")
+    user_path = f"users/{shared_mailbox}" if shared_mailbox else "me"
+    try:
+        async with httpx.AsyncClient() as client_http:
+            if message_id:
+                url = f"https://graph.microsoft.com/v1.0/{user_path}/messages/{message_id}/reply"
+                response = await client_http.post(url, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json={"comment": data.get("body", "")})
+            else:
+                url = f"https://graph.microsoft.com/v1.0/{user_path}/sendMail"
+                payload = {"message": {"subject": data.get("subject",""), "body": {"contentType":"Text","content":data.get("body","")}, "toRecipients": [{"emailAddress":{"address":a}} for a in data.get("to",[])]}}
+                if data.get("cc"):
+                    payload["message"]["ccRecipients"] = [{"emailAddress":{"address":a}} for a in data["cc"]]
+                response = await client_http.post(url, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=payload)
+        if response.status_code in [200, 202]:
+            if data.get("client_id"):
+                client = await db.clients.find_one({"id": data["client_id"]}, {"_id": 0})
+                comm = Communication(client_id=data["client_id"], client_name=client.get("name","") if client else "", channel="email", direction="outbound", subject=data.get("subject","RE: (reply)"), body=data.get("body",""), status="sent", ai_generated=data.get("ai_generated",False), created_by=user['name'])
+                await db.communications.insert_one(comm.model_dump())
+            await log_audit(user['id'], user['name'], 'email_sent', 'email', message_id, {'to': data.get('to',[]), 'subject': data.get('subject','')})
+            return {"status": "sent", "message": "Email sent successfully"}
+        else:
+            raise HTTPException(status_code=response.status_code, detail=f"Graph API error: {response.text[:200]}")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send: {str(e)[:200]}")
+
+@api_router.get("/calendar/events")
+async def get_calendar_events(start_date: Optional[str] = None, end_date: Optional[str] = None, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    token = await get_graph_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="Microsoft 365 not connected")
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    shared_mailbox = integration.get('config', {}).get('shared_mailbox')
+    if not start_date:
+        start_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+    if not end_date:
+        end_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%dT23:59:59Z")
+    url = f"https://graph.microsoft.com/v1.0/users/{shared_mailbox}/calendarView" if shared_mailbox else "https://graph.microsoft.com/v1.0/me/calendarView"
+    params = {"startDateTime": start_date, "endDateTime": end_date, "$orderby": "start/dateTime", "$top": 50, "$select": "id,subject,start,end,attendees,location,isOnlineMeeting,onlineMeetingUrl,organizer"}
+    try:
+        async with httpx.AsyncClient() as client_http:
+            response = await client_http.get(url, headers={"Authorization": f"Bearer {token}", "Prefer": 'outlook.timezone="UTC"'}, params=params)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=f"Graph API error: {response.text[:200]}")
+        events = response.json().get("value", [])
+        return [{"id": e.get("id"), "subject": e.get("subject"), "start": e.get("start",{}).get("dateTime"), "end": e.get("end",{}).get("dateTime"), "location": e.get("location",{}).get("displayName",""), "attendees": [a.get("emailAddress",{}).get("name","") for a in e.get("attendees",[])], "isOnlineMeeting": e.get("isOnlineMeeting"), "onlineMeetingUrl": e.get("onlineMeetingUrl"), "organizer": e.get("organizer",{}).get("emailAddress",{}).get("name",""), "source": "outlook"} for e in events]
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch calendar: {str(e)[:200]}")
+
+@api_router.post("/calendar/create-event")
+async def create_calendar_event(data: Dict[str, Any], user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    token = await get_graph_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="Microsoft 365 not connected")
+    integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+    shared_mailbox = integration.get('config', {}).get('shared_mailbox')
+    url = f"https://graph.microsoft.com/v1.0/users/{shared_mailbox}/events" if shared_mailbox else "https://graph.microsoft.com/v1.0/me/events"
+    event_body = {"subject": data.get("subject",""), "start": {"dateTime": data.get("start_datetime"), "timeZone": "UTC"}, "end": {"dateTime": data.get("end_datetime"), "timeZone": "UTC"}, "attendees": [{"emailAddress": {"address": email, "name": name}, "type": "required"} for email, name in zip(data.get("attendee_emails",[]), data.get("attendee_names",[]))]}
+    if data.get("location"):
+        event_body["location"] = {"displayName": data["location"]}
+    if data.get("body"):
+        event_body["body"] = {"contentType": "Text", "content": data["body"]}
+    if data.get("is_online", False):
+        event_body["isOnlineMeeting"] = True
+        event_body["onlineMeetingProvider"] = "teamsForBusiness"
+    try:
+        async with httpx.AsyncClient() as client_http:
+            response = await client_http.post(url, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=event_body)
+        if response.status_code in [200, 201]:
+            created = response.json()
+            await log_audit(user['id'], user['name'], 'calendar_event', 'event', created.get('id'), {'subject': data.get('subject'), 'attendees': data.get('attendee_emails',[])})
+            return {"status": "created", "event_id": created.get("id"), "webLink": created.get("webLink")}
+        else:
+            raise HTTPException(status_code=response.status_code, detail=f"Graph API error: {response.text[:200]}")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to create event: {str(e)[:200]}")
 
 # =============================================================================
 # REPORT GENERATION (DOCX)

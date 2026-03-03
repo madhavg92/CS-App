@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   MessageSquare, Send, FileEdit, Clock, Filter, Sparkles,
-  Mail, Phone as PhoneIcon, Users, Check, X
+  Mail, Phone as PhoneIcon, Users, Check, X, RefreshCw, Inbox
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -34,9 +34,93 @@ const CommunicationsPage = () => {
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [sending, setSending] = useState(false);
 
+  // Outlook Inbox
+  const [m365Connected, setM365Connected] = useState(false);
+  const [emailThreads, setEmailThreads] = useState([]);
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [threadMessages, setThreadMessages] = useState([]);
+  const [draftReply, setDraftReply] = useState('');
+  const [selectedClientForReply, setSelectedClientForReply] = useState('');
+  const [generatingReply, setGeneratingReply] = useState(false);
+  const [inboxLoading, setInboxLoading] = useState(false);
+
   useEffect(() => {
     fetchData();
+    checkM365();
   }, []);
+
+  const checkM365 = async () => {
+    try {
+      const r = await axios.get(`${API}/integrations`);
+      setM365Connected(r.data.find(i => i.integration_name === 'microsoft_365')?.connection_status === 'connected');
+    } catch(e) {
+      setM365Connected(false);
+    }
+  };
+
+  const fetchEmailThreads = async () => {
+    setInboxLoading(true);
+    try {
+      const r = await axios.get(`${API}/email/threads`);
+      setEmailThreads(r.data);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setInboxLoading(false);
+    }
+  };
+
+  const fetchThreadMessages = async (cid) => {
+    try {
+      const r = await axios.get(`${API}/email/thread/${cid}`);
+      setThreadMessages(r.data);
+    } catch(e) {
+      console.error(e);
+    }
+  };
+
+  const handleDraftAIReply = async () => {
+    if (!selectedThread) return;
+    setGeneratingReply(true);
+    try {
+      const r = await axios.post(`${API}/email/draft-reply`, { conversation_id: selectedThread.conversationId, client_id: selectedClientForReply || null });
+      setDraftReply(r.data.reply);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setGeneratingReply(false);
+    }
+  };
+
+  const handleSendReply = async () => {
+    if (!draftReply || !selectedThread) return;
+    try {
+      await axios.post(`${API}/email/send`, { message_id: threadMessages[threadMessages.length-1]?.id, body: draftReply, client_id: selectedClientForReply || null, subject: selectedThread.subject, ai_generated: true });
+      setDraftReply('');
+      setSelectedThread(null);
+      fetchEmailThreads();
+    } catch(e) {
+      console.error(e);
+    }
+  };
+
+  const handleSaveAsDraft = async () => {
+    if (!draftReply || !selectedClientForReply) return;
+    try {
+      await axios.post(`${API}/communications`, {
+        client_id: selectedClientForReply,
+        channel: 'email',
+        subject: `RE: ${selectedThread?.subject || 'Email Reply'}`,
+        body: draftReply,
+        comm_type: 'draft',
+        ai_generated: true
+      });
+      setDraftReply('');
+      alert('Saved as draft');
+    } catch(e) {
+      console.error(e);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -195,7 +279,7 @@ const CommunicationsPage = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); if (v === 'inbox' && m365Connected) fetchEmailThreads(); }}>
         <TabsList className="bg-white border">
           <TabsTrigger value="drafts" data-testid="tab-drafts">
             Draft Queue ({drafts.length})
@@ -205,6 +289,11 @@ const CommunicationsPage = () => {
           </TabsTrigger>
           <TabsTrigger value="received" data-testid="tab-received">
             Received ({received.length})
+          </TabsTrigger>
+          <TabsTrigger value="inbox" data-testid="tab-inbox">
+            <Inbox className="h-4 w-4 mr-1" />
+            Outlook Inbox
+            {m365Connected && <Badge className="ml-2 bg-green-100 text-green-700">Connected</Badge>}
           </TabsTrigger>
         </TabsList>
 
@@ -365,6 +454,134 @@ const CommunicationsPage = () => {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Outlook Inbox Tab */}
+        <TabsContent value="inbox" className="mt-6">
+          {!m365Connected ? (
+            <Card className="bg-white">
+              <CardContent className="py-12 text-center">
+                <Mail className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                <p className="text-slate-500 font-medium">Microsoft 365 not connected</p>
+                <p className="text-sm text-slate-400 mt-1">Go to Settings &gt; Integrations to connect your Outlook account</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Thread List */}
+              <Card className="bg-white">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Email Threads</CardTitle>
+                    <Button variant="outline" size="sm" onClick={fetchEmailThreads} disabled={inboxLoading}>
+                      <RefreshCw className={`h-4 w-4 mr-1 ${inboxLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="max-h-[600px] overflow-y-auto">
+                  {inboxLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1B4F72]"></div>
+                    </div>
+                  ) : emailThreads.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400">
+                      <Inbox className="h-8 w-8 mx-auto mb-2" />
+                      <p>No emails found. Click Refresh to load.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {emailThreads.map((thread) => (
+                        <div
+                          key={thread.id}
+                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedThread?.id === thread.id ? 'bg-[#1B4F72]/5 border-[#1B4F72]' : 'hover:bg-slate-50'}`}
+                          onClick={() => { setSelectedThread(thread); fetchThreadMessages(thread.conversationId); setDraftReply(''); }}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm text-slate-900 truncate">{thread.from?.name || thread.from?.address}</span>
+                            {!thread.isRead && <Badge className="bg-blue-100 text-blue-700">New</Badge>}
+                            {thread.hasAttachments && <Badge variant="outline">Attachments</Badge>}
+                          </div>
+                          <p className="text-sm text-slate-700 font-medium truncate">{thread.subject}</p>
+                          <p className="text-xs text-slate-500 truncate mt-1">{thread.bodyPreview}</p>
+                          <p className="text-xs text-slate-400 mt-1">{new Date(thread.receivedDateTime).toLocaleString()}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Thread Detail & Reply */}
+              <Card className="bg-white">
+                <CardHeader>
+                  <CardTitle className="text-lg">{selectedThread ? selectedThread.subject : 'Select a Thread'}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {!selectedThread ? (
+                    <div className="text-center py-12 text-slate-400">
+                      <MessageSquare className="h-12 w-12 mx-auto mb-3" />
+                      <p>Select an email thread to view and reply</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Messages */}
+                      <div className="max-h-64 overflow-y-auto space-y-3 border rounded-lg p-3 bg-slate-50">
+                        {threadMessages.length === 0 ? (
+                          <p className="text-sm text-slate-400 text-center py-4">Loading thread...</p>
+                        ) : threadMessages.map((msg, idx) => (
+                          <div key={idx} className="p-2 bg-white rounded border">
+                            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+                              <span className="font-medium text-slate-700">{msg.from?.name || msg.from?.address}</span>
+                              <span>{new Date(msg.receivedDateTime).toLocaleString()}</span>
+                            </div>
+                            <div className="text-sm text-slate-600" dangerouslySetInnerHTML={{ __html: msg.body?.substring(0, 500) || '' }} />
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Reply Section */}
+                      <div className="space-y-3 pt-3 border-t">
+                        <div>
+                          <Label className="text-sm">Link to Client (optional)</Label>
+                          <Select value={selectedClientForReply} onValueChange={setSelectedClientForReply}>
+                            <SelectTrigger className="mt-1">
+                              <SelectValue placeholder="Select client for context" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">None</SelectItem>
+                              {clients.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button variant="outline" onClick={handleDraftAIReply} disabled={generatingReply} className="w-full">
+                          <Sparkles className="h-4 w-4 mr-2" />
+                          {generatingReply ? 'Generating...' : 'Draft AI Reply'}
+                        </Button>
+                        <Textarea
+                          placeholder="Write or edit your reply..."
+                          value={draftReply}
+                          onChange={(e) => setDraftReply(e.target.value)}
+                          className="min-h-32"
+                        />
+                        <div className="flex gap-2">
+                          <Button className="flex-1 bg-[#1B4F72] hover:bg-[#154360]" onClick={handleSendReply} disabled={!draftReply}>
+                            <Send className="h-4 w-4 mr-2" />
+                            Send Reply
+                          </Button>
+                          <Button variant="outline" onClick={handleSaveAsDraft} disabled={!draftReply || !selectedClientForReply}>
+                            Save as Draft
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           )}
         </TabsContent>

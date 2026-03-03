@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Calendar as CalendarIcon, Plus, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, AlertTriangle, ChevronLeft, ChevronRight, Mail } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Textarea } from '../components/ui/textarea';
+import { Switch } from '../components/ui/switch';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -23,14 +25,64 @@ const CalendarPage = () => {
   const [reviewType, setReviewType] = useState('');
   const [selectedAttendees, setSelectedAttendees] = useState([]);
   const [conflicts, setConflicts] = useState([]);
+  
+  // Outlook integration
+  const [m365Connected, setM365Connected] = useState(false);
+  const [outlookEvents, setOutlookEvents] = useState([]);
+  const [showOutlookDialog, setShowOutlookDialog] = useState(false);
+  const [outlookEventData, setOutlookEventData] = useState({
+    subject: '', start_datetime: '', end_datetime: '', attendee_emails: '', attendee_names: '', location: '', body: '', is_online: false
+  });
 
   useEffect(() => {
     fetchData();
+    checkM365();
   }, []);
 
   useEffect(() => {
     fetchReviews();
-  }, [selectedMember, currentDate]);
+    if (m365Connected) {
+      fetchOutlookEvents();
+    }
+  }, [selectedMember, currentDate, m365Connected]);
+
+  const checkM365 = async () => {
+    try {
+      const r = await axios.get(`${API}/integrations`);
+      setM365Connected(r.data.find(i => i.integration_name === 'microsoft_365')?.connection_status === 'connected');
+    } catch(e) {
+      setM365Connected(false);
+    }
+  };
+
+  const fetchOutlookEvents = async () => {
+    try {
+      const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString();
+      const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
+      const response = await axios.get(`${API}/calendar/events?start_date=${start}&end_date=${end}`);
+      setOutlookEvents(response.data);
+    } catch (error) {
+      console.error('Error fetching Outlook events:', error);
+    }
+  };
+
+  const handleCreateOutlookEvent = async () => {
+    try {
+      const data = {
+        ...outlookEventData,
+        attendee_emails: outlookEventData.attendee_emails ? outlookEventData.attendee_emails.split(',').map(e => e.trim()) : [],
+        attendee_names: outlookEventData.attendee_names ? outlookEventData.attendee_names.split(',').map(n => n.trim()) : []
+      };
+      await axios.post(`${API}/calendar/create-event`, data);
+      setShowOutlookDialog(false);
+      setOutlookEventData({ subject: '', start_datetime: '', end_datetime: '', attendee_emails: '', attendee_names: '', location: '', body: '', is_online: false });
+      fetchOutlookEvents();
+      alert('Event created in Outlook!');
+    } catch (error) {
+      console.error('Error creating Outlook event:', error);
+      alert('Failed to create event');
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -48,7 +100,7 @@ const CalendarPage = () => {
   const fetchReviews = async () => {
     try {
       const params = selectedMember !== 'all' ? `?attendee_id=${selectedMember}` : '';
-      const response = await axios.get(`${API}/scheduled-reviews${params}`);
+      const response = await axios.get(`${API}/reviews${params}`);
       setReviews(response.data);
     } catch (error) {
       console.error('Error fetching reviews:', error);
@@ -89,7 +141,7 @@ const CalendarPage = () => {
 
     try {
       const client = clients.find(c => c.id === selectedClient);
-      await axios.post(`${API}/scheduled-reviews`, {
+      await axios.post(`${API}/reviews`, {
         client_id: selectedClient,
         client_name: client.name,
         review_type: reviewType,
@@ -202,16 +254,29 @@ const CalendarPage = () => {
               </SelectContent>
             </Select>
           </div>
+          {m365Connected && (
+            <Badge className="bg-blue-100 text-blue-700 ml-4">
+              <Mail className="h-3 w-3 mr-1" />
+              Outlook Connected
+            </Badge>
+          )}
         </div>
 
-        <Dialog open={showAddReview} onOpenChange={setShowAddReview}>
-          <DialogTrigger asChild>
-            <Button className="bg-emerald-600 hover:bg-emerald-700">
-              <Plus className="h-4 w-4 mr-2" />
-              Schedule Review
+        <div className="flex gap-2">
+          {m365Connected && (
+            <Button variant="outline" onClick={() => setShowOutlookDialog(true)}>
+              <Mail className="h-4 w-4 mr-2" />
+              Create in Outlook
             </Button>
-          </DialogTrigger>
-          <DialogContent className="bg-white max-w-2xl">
+          )}
+          <Dialog open={showAddReview} onOpenChange={setShowAddReview}>
+            <DialogTrigger asChild>
+              <Button className="bg-emerald-600 hover:bg-emerald-700">
+                <Plus className="h-4 w-4 mr-2" />
+                Schedule Review
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-white max-w-2xl">
             <DialogHeader>
               <DialogTitle className="text-slate-900">Schedule Client Review</DialogTitle>
               <DialogDescription className="text-slate-600">
@@ -304,10 +369,11 @@ const CalendarPage = () => {
                 <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">
                   Schedule Review
                 </Button>
-              </DialogFooter>
+            </DialogFooter>
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <Card className="bg-white border-slate-200">
@@ -348,6 +414,12 @@ const CalendarPage = () => {
                 const hasConflict = hasConflictOnDate(date);
                 const isToday = new Date().toDateString() === date.toDateString();
                 
+                // Get Outlook events for this day
+                const dayOutlookEvents = outlookEvents.filter(e => {
+                  const eventDate = new Date(e.start);
+                  return eventDate.toDateString() === date.toDateString();
+                });
+                
                 return (
                   <div
                     key={day}
@@ -364,7 +436,8 @@ const CalendarPage = () => {
                       )}
                     </div>
                     <div className="space-y-1">
-                      {dayReviews.slice(0, 3).map((review) => (
+                      {/* App Reviews (green) */}
+                      {dayReviews.slice(0, 2).map((review) => (
                         <div
                           key={review.id}
                           className={`text-xs p-1 rounded text-white ${getReviewTypeColor(review.review_type)} cursor-pointer hover:opacity-80`}
@@ -374,9 +447,22 @@ const CalendarPage = () => {
                           <div className="truncate">{review.client_name}</div>
                         </div>
                       ))}
-                      {dayReviews.length > 3 && (
+                      {/* Outlook Events (blue) */}
+                      {dayOutlookEvents.slice(0, 2).map((event) => (
+                        <div
+                          key={event.id}
+                          className="text-xs p-1 rounded bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200"
+                          title={`Outlook: ${event.subject}`}
+                        >
+                          <div className="truncate flex items-center">
+                            <Mail className="h-3 w-3 mr-1 flex-shrink-0" />
+                            {event.subject}
+                          </div>
+                        </div>
+                      ))}
+                      {(dayReviews.length + dayOutlookEvents.length) > 4 && (
                         <div className="text-xs text-slate-600 font-medium">
-                          +{dayReviews.length - 3} more
+                          +{dayReviews.length + dayOutlookEvents.length - 4} more
                         </div>
                       )}
                     </div>
@@ -400,12 +486,71 @@ const CalendarPage = () => {
               <span className="text-slate-700">QBR</span>
             </div>
             <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-blue-100"></div>
+              <span className="text-slate-700">Outlook Event</span>
+            </div>
+            <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-red-600" />
               <span className="text-slate-700">Conflict Detected</span>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Outlook Event Dialog */}
+      <Dialog open={showOutlookDialog} onOpenChange={setShowOutlookDialog}>
+        <DialogContent className="bg-white max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-slate-900">Create Outlook Event</DialogTitle>
+            <DialogDescription className="text-slate-600">
+              Create a calendar event directly in Microsoft Outlook
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-slate-700">Subject</Label>
+              <Input value={outlookEventData.subject} onChange={(e) => setOutlookEventData(p => ({...p, subject: e.target.value}))} placeholder="Meeting title" required />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-slate-700">Start Date/Time</Label>
+                <Input type="datetime-local" value={outlookEventData.start_datetime} onChange={(e) => setOutlookEventData(p => ({...p, start_datetime: e.target.value}))} required />
+              </div>
+              <div>
+                <Label className="text-slate-700">End Date/Time</Label>
+                <Input type="datetime-local" value={outlookEventData.end_datetime} onChange={(e) => setOutlookEventData(p => ({...p, end_datetime: e.target.value}))} required />
+              </div>
+            </div>
+            <div>
+              <Label className="text-slate-700">Attendee Emails (comma-separated)</Label>
+              <Input value={outlookEventData.attendee_emails} onChange={(e) => setOutlookEventData(p => ({...p, attendee_emails: e.target.value}))} placeholder="john@example.com, jane@example.com" />
+            </div>
+            <div>
+              <Label className="text-slate-700">Attendee Names (comma-separated)</Label>
+              <Input value={outlookEventData.attendee_names} onChange={(e) => setOutlookEventData(p => ({...p, attendee_names: e.target.value}))} placeholder="John Doe, Jane Smith" />
+            </div>
+            <div>
+              <Label className="text-slate-700">Location</Label>
+              <Input value={outlookEventData.location} onChange={(e) => setOutlookEventData(p => ({...p, location: e.target.value}))} placeholder="Conference Room A" />
+            </div>
+            <div>
+              <Label className="text-slate-700">Description</Label>
+              <Textarea value={outlookEventData.body} onChange={(e) => setOutlookEventData(p => ({...p, body: e.target.value}))} placeholder="Meeting agenda..." />
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={outlookEventData.is_online} onCheckedChange={(checked) => setOutlookEventData(p => ({...p, is_online: checked}))} />
+              <Label className="text-slate-700">Teams Meeting</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOutlookDialog(false)}>Cancel</Button>
+            <Button className="bg-[#1B4F72] hover:bg-[#154360]" onClick={handleCreateOutlookEvent}>
+              <Mail className="h-4 w-4 mr-2" />
+              Create Event
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

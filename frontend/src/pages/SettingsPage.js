@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   Settings as SettingsIcon, Users, Bell, Shield, Save, 
-  UserPlus, Edit2, Check, X, FileText, Clock, Plus
+  UserPlus, Edit2, Check, X, FileText, Clock, Plus, Mail
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -55,6 +55,11 @@ const SettingsPage = () => {
   const [showAddPolicy, setShowAddPolicy] = useState(false);
   const [policyLoading, setPolicyLoading] = useState(false);
 
+  // Microsoft 365 Integration
+  const [m365Config, setM365Config] = useState({ tenant_id: '', client_id: '', client_secret: '', shared_mailbox: '' });
+  const [m365Status, setM365Status] = useState(null);
+  const [m365Testing, setM365Testing] = useState(false);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -65,6 +70,9 @@ const SettingsPage = () => {
     }
     if (activeTab === 'policies') {
       fetchPolicyUpdates();
+    }
+    if (activeTab === 'integrations') {
+      fetchM365Status();
     }
   }, [activeTab, auditFilters]);
 
@@ -93,6 +101,19 @@ const SettingsPage = () => {
     } finally {
       setPolicyLoading(false);
     }
+  };
+
+  const fetchM365Status = async () => {
+    try {
+      const response = await axios.get(`${API}/integrations`);
+      const m365 = response.data.find(i => i.integration_name === 'microsoft_365');
+      if (m365) {
+        setM365Status(m365);
+        if (m365.config) {
+          setM365Config({ tenant_id: m365.config.tenant_id || '', client_id: m365.config.client_id || '', client_secret: '', shared_mailbox: m365.config.shared_mailbox || '' });
+        }
+      }
+    } catch (error) { console.error('Error:', error); }
   };
 
   const fetchAuditLogs = async () => {
@@ -224,6 +245,10 @@ const SettingsPage = () => {
           <TabsTrigger value="policies" data-testid="tab-policies">
             <FileText className="h-4 w-4 mr-2" />
             Policies
+          </TabsTrigger>
+          <TabsTrigger value="integrations" data-testid="tab-integrations">
+            <Mail className="h-4 w-4 mr-2" />
+            Integrations
           </TabsTrigger>
         </TabsList>
 
@@ -630,6 +655,53 @@ const SettingsPage = () => {
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Integrations Tab */}
+        <TabsContent value="integrations" className="mt-6 space-y-6">
+          <Card className="bg-white border border-slate-200 shadow-sm">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2"><Mail className="h-5 w-5 text-[#1B4F72]" /> Microsoft 365 (Outlook + Calendar)</CardTitle>
+                  <CardDescription>Connect to Outlook email and calendar for unified communication tracking</CardDescription>
+                </div>
+                <Badge variant={m365Status?.connection_status === 'connected' ? 'default' : m365Status?.connection_status === 'error' ? 'destructive' : 'secondary'}>
+                  {m365Status?.connection_status || 'disconnected'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {m365Status?.connection_status === 'connected' && m365Status?.config?.org_name && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">Connected to: <strong>{m365Status.config.org_name}</strong></div>
+              )}
+              {m365Status?.last_error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">Error: {m365Status.last_error}</div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><Label>Tenant ID</Label><Input value={m365Config.tenant_id} onChange={(e) => setM365Config(p => ({...p, tenant_id: e.target.value}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></div>
+                <div><Label>Client ID</Label><Input value={m365Config.client_id} onChange={(e) => setM365Config(p => ({...p, client_id: e.target.value}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></div>
+                <div><Label>Client Secret</Label><Input type="password" value={m365Config.client_secret} onChange={(e) => setM365Config(p => ({...p, client_secret: e.target.value}))} placeholder={m365Status?.connection_status === 'connected' ? 'Stored securely' : 'Enter secret'} /></div>
+                <div><Label>Shared Mailbox (optional)</Label><Input value={m365Config.shared_mailbox} onChange={(e) => setM365Config(p => ({...p, shared_mailbox: e.target.value}))} placeholder="cs-team@company.com" /></div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button onClick={async () => { try { await axios.post(`${API}/integrations/microsoft-365/configure`, m365Config); fetchM365Status(); } catch(e) { console.error(e); } }} className="bg-[#1B4F72] hover:bg-[#154360]">Save Configuration</Button>
+                <Button variant="outline" disabled={m365Testing} onClick={async () => { setM365Testing(true); try { const r = await axios.post(`${API}/integrations/microsoft-365/test`); r.data.status === 'connected' ? alert('Connected to ' + r.data.org_name) : alert('Failed: ' + r.data.message); fetchM365Status(); } catch(e) { alert('Error: ' + (e.response?.data?.detail || e.message)); } finally { setM365Testing(false); } }}>
+                  {m365Testing ? 'Testing...' : 'Test Connection'}
+                </Button>
+              </div>
+              <div className="mt-4 bg-slate-50 rounded-lg p-4 text-sm text-slate-600">
+                <h4 className="font-semibold mb-2">Azure AD Setup</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Azure Portal: Azure AD, App registrations, New registration (Anka CS Hub, single tenant)</li>
+                  <li>API permissions: Microsoft Graph: Mail.ReadWrite, Mail.Send, Calendars.ReadWrite</li>
+                  <li>Certificates and secrets: create client secret, copy it</li>
+                  <li>Copy Application (client) ID and Directory (tenant) ID from Overview</li>
+                  <li>Grant admin consent, optionally add shared mailbox email above</li>
+                </ol>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
