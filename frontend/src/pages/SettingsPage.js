@@ -1,519 +1,449 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Settings as SettingsIcon, Plus, Trash2, Check, X, RefreshCw, Shield, Key, Mail, Calendar, Database, Cloud, Zap, ArrowRight } from 'lucide-react';
-import { Button } from '../components/ui/button';
+import { 
+  Settings as SettingsIcon, Users, Bell, Shield, Save, 
+  UserPlus, Edit2, Check, X
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import { Button } from '../components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { useAuth } from '../App';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const AVAILABLE_INTEGRATIONS = [
-  {
-    name: 'microsoft_graph',
-    displayName: 'Microsoft Graph (Outlook, Calendar, Teams)',
-    icon: Mail,
-    fields: [
-      { name: 'client_id', label: 'Client ID', type: 'text', required: true },
-      { name: 'client_secret', label: 'Client Secret', type: 'password', required: true },
-      { name: 'tenant_id', label: 'Tenant ID', type: 'text', required: true }
-    ],
-    description: 'Connect to Microsoft 365 for email, calendar, and Teams integration'
-  },
-  {
-    name: 'google_calendar',
-    displayName: 'Google Calendar',
-    icon: Calendar,
-    fields: [
-      { name: 'api_key', label: 'API Key', type: 'password', required: true },
-      { name: 'client_id', label: 'OAuth Client ID', type: 'text', required: false },
-      { name: 'client_secret', label: 'OAuth Client Secret', type: 'password', required: false }
-    ],
-    description: 'Sync meetings and reviews with Google Calendar'
-  },
-  {
-    name: 'salesforce',
-    displayName: 'Salesforce CRM',
-    icon: Database,
-    fields: [
-      { name: 'username', label: 'Username', type: 'text', required: true },
-      { name: 'password', label: 'Password', type: 'password', required: true },
-      { name: 'security_token', label: 'Security Token', type: 'password', required: true },
-      { name: 'instance_url', label: 'Instance URL', type: 'text', required: true, placeholder: 'https://yourinstance.salesforce.com' }
-    ],
-    description: 'Sync client data with Salesforce CRM'
-  },
-  {
-    name: 'slack',
-    displayName: 'Slack',
-    icon: Cloud,
-    fields: [
-      { name: 'bot_token', label: 'Bot Token', type: 'password', required: true },
-      { name: 'webhook_url', label: 'Webhook URL', type: 'text', required: false }
-    ],
-    description: 'Send notifications and alerts to Slack channels'
-  },
-  {
-    name: 'twilio',
-    displayName: 'Twilio SMS',
-    icon: Mail,
-    fields: [
-      { name: 'account_sid', label: 'Account SID', type: 'text', required: true },
-      { name: 'auth_token', label: 'Auth Token', type: 'password', required: true },
-      { name: 'phone_number', label: 'Twilio Phone Number', type: 'text', required: true }
-    ],
-    description: 'Send SMS notifications for urgent alerts'
-  }
-];
-
 const SettingsPage = () => {
-  const [integrations, setIntegrations] = useState([]);
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [selectedIntegration, setSelectedIntegration] = useState(null);
-  const [formData, setFormData] = useState({});
-  const [testingId, setTestingId] = useState(null);
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('alerts');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  
+  // Alert thresholds
+  const [thresholds, setThresholds] = useState({
+    engagement_gap_decision_maker_days: 14,
+    engagement_gap_influencer_days: 30,
+    renewal_alert_60_days: true,
+    renewal_alert_30_days: true,
+    renewal_alert_15_days: true,
+    performance_decline_threshold_pct: 5.0,
+    followup_overdue_days: 7
+  });
+  
+  // Users
+  const [users, setUsers] = useState([]);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'csm' });
+  const [editingUser, setEditingUser] = useState(null);
 
   useEffect(() => {
-    fetchIntegrations();
+    fetchData();
   }, []);
 
-  const fetchIntegrations = async () => {
+  const fetchData = async () => {
     try {
-      const response = await axios.get(`${API}/integrations`);
-      setIntegrations(response.data);
+      const [thresholdsRes, usersRes] = await Promise.all([
+        axios.get(`${API}/settings/alert-thresholds`),
+        axios.get(`${API}/users`)
+      ]);
+      setThresholds(thresholdsRes.data);
+      setUsers(usersRes.data);
     } catch (error) {
-      console.error('Error fetching integrations:', error);
-    }
-  };
-
-  const handleAddIntegration = async () => {
-    if (!selectedIntegration) return;
-
-    const integrationTemplate = AVAILABLE_INTEGRATIONS.find(i => i.name === selectedIntegration);
-    const credentials = {};
-    
-    integrationTemplate.fields.forEach(field => {
-      if (formData[field.name]) {
-        credentials[field.name] = formData[field.name];
-      }
-    });
-
-    try {
-      await axios.post(`${API}/integrations`, {
-        integration_name: selectedIntegration,
-        display_name: integrationTemplate.displayName,
-        credentials,
-        config: {}
-      });
-      
-      setShowAddDialog(false);
-      setSelectedIntegration(null);
-      setFormData({});
-      fetchIntegrations();
-    } catch (error) {
-      console.error('Error adding integration:', error);
-      alert('Error adding integration');
-    }
-  };
-
-  const handleToggleEnabled = async (integrationId, currentStatus) => {
-    try {
-      await axios.patch(`${API}/integrations/${integrationId}`, {
-        is_enabled: !currentStatus
-      });
-      fetchIntegrations();
-    } catch (error) {
-      console.error('Error toggling integration:', error);
-    }
-  };
-
-  const handleTestConnection = async (integrationId) => {
-    setTestingId(integrationId);
-    try {
-      const response = await axios.post(`${API}/integrations/${integrationId}/test`);
-      alert(response.data.status === 'connected' ? 'Connection successful!' : `Connection failed: ${response.data.message}`);
-      fetchIntegrations();
-    } catch (error) {
-      console.error('Error testing connection:', error);
-      alert('Error testing connection');
+      console.error('Error fetching settings:', error);
     } finally {
-      setTestingId(null);
+      setLoading(false);
     }
   };
 
-  const handleDeleteIntegration = async (integrationId) => {
-    if (!confirm('Are you sure you want to delete this integration?')) return;
-    
+  const handleSaveThresholds = async () => {
+    setSaving(true);
     try {
-      await axios.delete(`${API}/integrations/${integrationId}`);
-      fetchIntegrations();
+      await axios.post(`${API}/settings/alert-thresholds`, thresholds);
+      alert('Settings saved successfully');
     } catch (error) {
-      console.error('Error deleting integration:', error);
+      console.error('Error saving thresholds:', error);
+      alert('Failed to save settings');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const getStatusBadge = (status) => {
-    const styles = {
-      connected: { bg: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: Check },
-      error: { bg: 'bg-red-100 text-red-700 border-red-200', icon: X },
-      not_configured: { bg: 'bg-slate-100 text-slate-700 border-slate-200', icon: SettingsIcon }
-    };
-    
-    const style = styles[status] || styles.not_configured;
-    const Icon = style.icon;
-    
-    return (
-      <Badge className={`${style.bg} border`}>
-        <Icon className="h-3 w-3 mr-1" />
-        {status.replace('_', ' ')}
-      </Badge>
-    );
+  const handleAddUser = async () => {
+    try {
+      await axios.post(`${API}/auth/register`, newUser);
+      setShowAddUser(false);
+      setNewUser({ name: '', email: '', password: '', role: 'csm' });
+      fetchData();
+    } catch (error) {
+      console.error('Error adding user:', error);
+      alert(error.response?.data?.detail || 'Failed to add user');
+    }
   };
 
-  const configuredIntegrations = integrations.length;
-  const activeIntegrations = integrations.filter(i => i.is_enabled).length;
-  const connectedIntegrations = integrations.filter(i => i.connection_status === 'connected').length;
+  const handleUpdateUser = async (userId, updates) => {
+    try {
+      await axios.patch(`${API}/users/${userId}`, null, { params: updates });
+      setEditingUser(null);
+      fetchData();
+    } catch (error) {
+      console.error('Error updating user:', error);
+    }
+  };
+
+  const getRoleBadge = (role) => {
+    const styles = {
+      cs_lead: 'bg-purple-100 text-purple-700',
+      csm: 'bg-blue-100 text-blue-700',
+      ops: 'bg-green-100 text-green-700'
+    };
+    return styles[role] || 'bg-slate-100 text-slate-600';
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1B4F72]"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <Shield className="h-8 w-8 text-emerald-600" />
-          <h2 className="text-3xl font-bold text-slate-900">Super Admin Settings</h2>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Shield className="h-8 w-8 text-[#1B4F72]" />
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
+          <p className="text-slate-600">System configuration and user management</p>
         </div>
-        <p className="text-slate-600">Manage API integrations and system-wide configurations</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <Card className="bg-white border-slate-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600">Configured</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900">{configuredIntegrations}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-white border-slate-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600">Active</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-emerald-600">{activeIntegrations}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-white border-slate-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600">Connected</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{connectedIntegrations}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="integrations" className="space-y-6">
-        <TabsList className="bg-white border border-slate-200">
-          <TabsTrigger value="integrations">API Integrations</TabsTrigger>
-          <TabsTrigger value="available">Available Integrations</TabsTrigger>
-          <TabsTrigger value="flows">Data Flows & Automation</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="bg-white border">
+          <TabsTrigger value="alerts" data-testid="tab-alerts">
+            <Bell className="h-4 w-4 mr-2" />
+            Alert Thresholds
+          </TabsTrigger>
+          <TabsTrigger value="users" data-testid="tab-users">
+            <Users className="h-4 w-4 mr-2" />
+            User Management
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="integrations">
-          <Card className="bg-white border-slate-200">
+        {/* Alert Thresholds Tab */}
+        <TabsContent value="alerts" className="mt-6">
+          <Card className="bg-white">
+            <CardHeader>
+              <CardTitle>Alert Threshold Configuration</CardTitle>
+              <CardDescription>Configure when alerts are triggered for all clients</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Engagement Gap */}
+              <div className="space-y-4">
+                <h3 className="font-medium text-slate-900 flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-[#1B4F72]" />
+                  Engagement Gap Alerts
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6">
+                  <div className="space-y-2">
+                    <Label>Decision Maker Gap (days)</Label>
+                    <Input
+                      type="number"
+                      value={thresholds.engagement_gap_decision_maker_days}
+                      onChange={(e) => setThresholds({
+                        ...thresholds,
+                        engagement_gap_decision_maker_days: parseInt(e.target.value)
+                      })}
+                      data-testid="threshold-decision-maker"
+                    />
+                    <p className="text-xs text-slate-500">Alert if no contact with decision makers for this many days</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Influencer Gap (days)</Label>
+                    <Input
+                      type="number"
+                      value={thresholds.engagement_gap_influencer_days}
+                      onChange={(e) => setThresholds({
+                        ...thresholds,
+                        engagement_gap_influencer_days: parseInt(e.target.value)
+                      })}
+                      data-testid="threshold-influencer"
+                    />
+                    <p className="text-xs text-slate-500">Alert if no contact with influencers for this many days</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Renewal Alerts */}
+              <div className="space-y-4">
+                <h3 className="font-medium text-slate-900 flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-[#1B4F72]" />
+                  Renewal Alerts
+                </h3>
+                <div className="space-y-3 pl-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>60 Days Before Renewal</Label>
+                      <p className="text-xs text-slate-500">Medium severity alert</p>
+                    </div>
+                    <Switch
+                      checked={thresholds.renewal_alert_60_days}
+                      onCheckedChange={(v) => setThresholds({...thresholds, renewal_alert_60_days: v})}
+                      data-testid="toggle-renewal-60"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>30 Days Before Renewal</Label>
+                      <p className="text-xs text-slate-500">High severity alert</p>
+                    </div>
+                    <Switch
+                      checked={thresholds.renewal_alert_30_days}
+                      onCheckedChange={(v) => setThresholds({...thresholds, renewal_alert_30_days: v})}
+                      data-testid="toggle-renewal-30"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>15 Days Before Renewal</Label>
+                      <p className="text-xs text-slate-500">Critical severity alert</p>
+                    </div>
+                    <Switch
+                      checked={thresholds.renewal_alert_15_days}
+                      onCheckedChange={(v) => setThresholds({...thresholds, renewal_alert_15_days: v})}
+                      data-testid="toggle-renewal-15"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Performance Alerts */}
+              <div className="space-y-4">
+                <h3 className="font-medium text-slate-900 flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-[#1B4F72]" />
+                  Performance Alerts
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6">
+                  <div className="space-y-2">
+                    <Label>Performance Decline Threshold (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={thresholds.performance_decline_threshold_pct}
+                      onChange={(e) => setThresholds({
+                        ...thresholds,
+                        performance_decline_threshold_pct: parseFloat(e.target.value)
+                      })}
+                      data-testid="threshold-performance"
+                    />
+                    <p className="text-xs text-slate-500">Alert if recovery rate drops by this percentage</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Follow-up Overdue (days)</Label>
+                    <Input
+                      type="number"
+                      value={thresholds.followup_overdue_days}
+                      onChange={(e) => setThresholds({
+                        ...thresholds,
+                        followup_overdue_days: parseInt(e.target.value)
+                      })}
+                      data-testid="threshold-followup"
+                    />
+                    <p className="text-xs text-slate-500">Alert if follow-up is open longer than this</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t">
+                <Button 
+                  className="bg-[#1B4F72] hover:bg-[#154360]"
+                  onClick={handleSaveThresholds}
+                  disabled={saving}
+                  data-testid="save-thresholds"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  {saving ? 'Saving...' : 'Save Settings'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* User Management Tab */}
+        <TabsContent value="users" className="mt-6">
+          <Card className="bg-white">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Configured Integrations</CardTitle>
-                  <CardDescription>Manage your API connections and credentials</CardDescription>
+                  <CardTitle>User Management</CardTitle>
+                  <CardDescription>Manage team members and their access levels</CardDescription>
                 </div>
-                <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-                  <DialogTrigger asChild>
-                    <Button className="bg-emerald-600 hover:bg-emerald-700">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Integration
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="bg-white max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle className="text-slate-900">Add New Integration</DialogTitle>
-                      <DialogDescription className="text-slate-600">
-                        Configure a new API integration
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
+                <Button 
+                  className="bg-[#1B4F72] hover:bg-[#154360]"
+                  onClick={() => setShowAddUser(true)}
+                  data-testid="add-user-btn"
+                >
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Add User
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {users.map((u) => (
+                  <div 
+                    key={u.id}
+                    className="p-4 bg-slate-50 rounded-lg border border-slate-100 flex items-center justify-between"
+                    data-testid={`user-${u.id}`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-[#1B4F72] flex items-center justify-center text-white font-medium">
+                        {u.name.charAt(0)}
+                      </div>
                       <div>
-                        <Label className="text-slate-700">Select Integration</Label>
-                        <select
-                          className="w-full p-2 border border-slate-300 rounded-md"
-                          value={selectedIntegration || ''}
-                          onChange={(e) => {
-                            setSelectedIntegration(e.target.value);
-                            setFormData({});
-                          }}
-                        >
-                          <option value="">Choose an integration...</option>
-                          {AVAILABLE_INTEGRATIONS.map((integration) => (
-                            <option key={integration.name} value={integration.name}>
-                              {integration.displayName}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {selectedIntegration && (
-                        <div className="space-y-3 pt-4 border-t border-slate-200">
-                          {AVAILABLE_INTEGRATIONS.find(i => i.name === selectedIntegration)?.fields.map((field) => (
-                            <div key={field.name}>
-                              <Label className="text-slate-700">
-                                {field.label}
-                                {field.required && <span className="text-red-600 ml-1">*</span>}
-                              </Label>
-                              <Input
-                                type={field.type}
-                                placeholder={field.placeholder}
-                                value={formData[field.name] || ''}
-                                onChange={(e) => setFormData({...formData, [field.name]: e.target.value})}
-                                className="bg-white border-slate-300"
-                                required={field.required}
-                              />
-                            </div>
-                          ))}
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-slate-900">{u.name}</h4>
+                          <Badge className={getRoleBadge(u.role)}>{u.role.replace('_', ' ')}</Badge>
+                          {!u.is_active && <Badge className="bg-red-100 text-red-700">Inactive</Badge>}
                         </div>
-                      )}
+                        <p className="text-sm text-slate-500">{u.email}</p>
+                      </div>
                     </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setShowAddDialog(false)}>Cancel</Button>
-                      <Button 
-                        className="bg-emerald-600 hover:bg-emerald-700" 
-                        onClick={handleAddIntegration}
-                        disabled={!selectedIntegration}
-                      >
-                        Add Integration
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {integrations.length === 0 ? (
-                <div className="text-center py-12">
-                  <Key className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                  <p className="text-slate-600">No integrations configured yet</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {integrations.map((integration) => {
-                    const template = AVAILABLE_INTEGRATIONS.find(i => i.name === integration.integration_name);
-                    const Icon = template?.icon || Database;
                     
-                    return (
-                      <div key={integration.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-4 flex-1">
-                            <div className="p-3 bg-white rounded-lg border border-slate-200">
-                              <Icon className="h-6 w-6 text-emerald-600" />
-                            </div>
-                            <div className="flex-1">
-                              <div className="flex items-center gap-3 mb-2">
-                                <h4 className="font-semibold text-slate-900">{integration.display_name}</h4>
-                                {getStatusBadge(integration.connection_status)}
-                                {integration.is_enabled && (
-                                  <Badge className="bg-emerald-100 text-emerald-700">Enabled</Badge>
-                                )}
-                              </div>
-                              <p className="text-sm text-slate-600 mb-3">{template?.description}</p>
-                              {integration.last_tested && (
-                                <p className="text-xs text-slate-500">
-                                  Last tested: {new Date(integration.last_tested).toLocaleString()}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Switch
-                              checked={integration.is_enabled}
-                              onCheckedChange={() => handleToggleEnabled(integration.id, integration.is_enabled)}
-                            />
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleTestConnection(integration.id)}
-                              disabled={testingId === integration.id}
-                            >
-                              <RefreshCw className={`h-4 w-4 ${testingId === integration.id ? 'animate-spin' : ''}`} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteIntegration(integration.id)}
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
+                    {u.id !== user?.id && (
+                      <div className="flex items-center gap-2">
+                        <Select 
+                          value={u.role}
+                          onValueChange={(v) => handleUpdateUser(u.id, { role: v })}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cs_lead">CS Lead</SelectItem>
+                            <SelectItem value="csm">CSM</SelectItem>
+                            <SelectItem value="ops">Ops</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant={u.is_active ? 'destructive' : 'default'}
+                          size="sm"
+                          onClick={() => handleUpdateUser(u.id, { is_active: !u.is_active })}
+                        >
+                          {u.is_active ? 'Disable' : 'Enable'}
+                        </Button>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                    )}
+                  </div>
+                ))}
+              </div>
 
-        <TabsContent value="available">
-          <Card className="bg-white border-slate-200">
-            <CardHeader>
-              <CardTitle>Available Integrations</CardTitle>
-              <CardDescription>Third-party services you can connect to</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {AVAILABLE_INTEGRATIONS.map((integration) => {
-                  const Icon = integration.icon;
-                  const isConfigured = integrations.some(i => i.integration_name === integration.name);
-                  
-                  return (
-                    <div key={integration.name} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 bg-white rounded-lg border border-slate-200">
-                          <Icon className="h-5 w-5 text-slate-600" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-slate-900 mb-1">{integration.displayName}</h4>
-                          <p className="text-sm text-slate-600 mb-2">{integration.description}</p>
-                          {isConfigured && (
-                            <Badge className="bg-emerald-100 text-emerald-700">Configured</Badge>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              {/* Role Permissions Info */}
+              <div className="mt-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                <h4 className="font-medium text-slate-900 mb-3">Role Permissions</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <Badge className="bg-purple-100 text-purple-700 mb-2">CS Lead</Badge>
+                    <ul className="space-y-1 text-slate-600">
+                      <li>• Full access to all features</li>
+                      <li>• Configure alert thresholds</li>
+                      <li>• Manage users</li>
+                      <li>• View all clients</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <Badge className="bg-blue-100 text-blue-700 mb-2">CSM</Badge>
+                    <ul className="space-y-1 text-slate-600">
+                      <li>• Access assigned clients only</li>
+                      <li>• Generate drafts & reports</li>
+                      <li>• Manage alerts & follow-ups</li>
+                      <li>• Cannot modify settings</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <Badge className="bg-green-100 text-green-700 mb-2">Ops</Badge>
+                    <ul className="space-y-1 text-slate-600">
+                      <li>• Read-only access</li>
+                      <li>• View performance data</li>
+                      <li>• View reports</li>
+                      <li>• No communications access</li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="flows">
-          <div className="space-y-6">
-            <Card className="bg-blue-50 border-blue-200">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <Zap className="h-6 w-6 text-blue-600 mt-1" />
-                  <div>
-                    <h3 className="font-semibold text-blue-900 mb-2">How Integrations Connect to Your Data</h3>
-                    <p className="text-blue-800 text-sm mb-4">
-                      Each integration automatically syncs data between external services and your platform. 
-                      Configure automations to trigger actions based on events.
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                      <div className="flex items-center gap-2 text-blue-700">
-                        <ArrowRight className="h-4 w-4" />
-                        <span>Emails → Communications</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-blue-700">
-                        <ArrowRight className="h-4 w-4" />
-                        <span>Calendar → Review Schedule</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-blue-700">
-                        <ArrowRight className="h-4 w-4" />
-                        <span>Alerts → Slack/SMS</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white border-slate-200">
-              <CardHeader>
-                <CardTitle>Example: Microsoft Graph Integration</CardTitle>
-                <CardDescription>See how Outlook connects to your platform</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="flex items-center gap-4 mb-3">
-                      <Badge className="bg-blue-100 text-blue-700">Outlook Emails</Badge>
-                      <ArrowRight className="h-5 w-5 text-emerald-600" />
-                      <Badge className="bg-emerald-100 text-emerald-700">Communications History</Badge>
-                    </div>
-                    <p className="text-sm text-slate-600 mb-2">
-                      <strong>What happens:</strong> Every 15 minutes, platform fetches new emails from client contacts, 
-                      runs AI sentiment analysis, and creates Communication records automatically.
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      <strong>Result:</strong> Your Communications page shows all client emails with sentiment scores (positive/negative/neutral)
-                    </p>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="flex items-center gap-4 mb-3">
-                      <Badge className="bg-emerald-100 text-emerald-700">Review Calendar</Badge>
-                      <span className="text-purple-600">↔️</span>
-                      <Badge className="bg-blue-100 text-blue-700">Outlook Calendar</Badge>
-                    </div>
-                    <p className="text-sm text-slate-600 mb-2">
-                      <strong>What happens:</strong> When you schedule a review in platform, it automatically creates 
-                      calendar invite in Outlook. Changes sync both ways in real-time.
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      <strong>Result:</strong> Team members see meetings in their Outlook calendar with all details
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white border-slate-200">
-              <CardHeader>
-                <CardTitle>Automation Rules</CardTitle>
-                <CardDescription>Auto-trigger actions based on events</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium text-emerald-900">✅ Active</span>
-                      <Badge className="bg-emerald-600 text-white">Slack</Badge>
-                    </div>
-                    <p className="text-sm text-emerald-800">
-                      <strong>When:</strong> High priority alert created → <strong>Then:</strong> Send to #cs-alerts channel
-                    </p>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium text-slate-700">⏸️ Inactive</span>
-                      <Badge className="bg-slate-600 text-white">SMS</Badge>
-                    </div>
-                    <p className="text-sm text-slate-700">
-                      <strong>When:</strong> Health score drops below 70 → <strong>Then:</strong> Text relationship owner
-                    </p>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium text-slate-700">⏸️ Inactive</span>
-                      <Badge className="bg-slate-600 text-white">Salesforce</Badge>
-                    </div>
-                    <p className="text-sm text-slate-700">
-                      <strong>When:</strong> Every Monday 8 AM → <strong>Then:</strong> Push weekly metrics to Salesforce
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
       </Tabs>
+
+      {/* Add User Dialog */}
+      <Dialog open={showAddUser} onOpenChange={setShowAddUser}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Add New User</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input
+                value={newUser.name}
+                onChange={(e) => setNewUser({...newUser, name: e.target.value})}
+                placeholder="Full name"
+                data-testid="new-user-name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input
+                type="email"
+                value={newUser.email}
+                onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+                placeholder="email@company.com"
+                data-testid="new-user-email"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Password *</Label>
+              <Input
+                type="password"
+                value={newUser.password}
+                onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                placeholder="Minimum 6 characters"
+                data-testid="new-user-password"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Role *</Label>
+              <Select value={newUser.role} onValueChange={(v) => setNewUser({...newUser, role: v})}>
+                <SelectTrigger data-testid="new-user-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cs_lead">CS Lead</SelectItem>
+                  <SelectItem value="csm">CSM</SelectItem>
+                  <SelectItem value="ops">Ops</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddUser(false)}>Cancel</Button>
+            <Button 
+              className="bg-[#1B4F72] hover:bg-[#154360]"
+              onClick={handleAddUser}
+              disabled={!newUser.name || !newUser.email || !newUser.password}
+              data-testid="create-user-btn"
+            >
+              Add User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

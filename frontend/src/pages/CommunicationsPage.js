@@ -1,283 +1,425 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Mail, Send, FileText, Sparkles, Loader } from 'lucide-react';
-import { Button } from '../components/ui/button';
+import { 
+  MessageSquare, Send, FileEdit, Clock, Filter, Sparkles,
+  Mail, Phone as PhoneIcon, Users, Check, X
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Label } from '../components/ui/label';
-import { Textarea } from '../components/ui/textarea';
-import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
+import { Textarea } from '../components/ui/textarea';
+import { Label } from '../components/ui/label';
+import { useAuth } from '../App';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const CommunicationsPage = () => {
-  const [clients, setClients] = useState([]);
-  const [selectedClient, setSelectedClient] = useState('');
-  const [emailType, setEmailType] = useState('');
-  const [context, setContext] = useState('');
-  const [draftedEmail, setDraftedEmail] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('drafts');
   const [communications, setCommunications] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({
+    client_id: 'all',
+    channel: 'all'
+  });
+  
+  // Send dialog
+  const [selectedComm, setSelectedComm] = useState(null);
+  const [showSendDialog, setShowSendDialog] = useState(false);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    fetchClients();
+    fetchData();
   }, []);
 
-  useEffect(() => {
-    if (selectedClient) {
-      fetchCommunications(selectedClient);
-    }
-  }, [selectedClient]);
-
-  const fetchClients = async () => {
+  const fetchData = async () => {
     try {
-      const response = await axios.get(`${API}/clients`);
-      setClients(response.data);
-      if (response.data.length > 0) {
-        setSelectedClient(response.data[0].id);
-      }
+      const [commsRes, clientsRes] = await Promise.all([
+        axios.get(`${API}/communications`),
+        axios.get(`${API}/clients`)
+      ]);
+      setCommunications(commsRes.data);
+      setClients(clientsRes.data);
     } catch (error) {
-      console.error('Error fetching clients:', error);
-    }
-  };
-
-  const fetchCommunications = async (clientId) => {
-    try {
-      const response = await axios.get(`${API}/communications/${clientId}`);
-      setCommunications(response.data);
-    } catch (error) {
-      console.error('Error fetching communications:', error);
-    }
-  };
-
-  const handleDraftEmail = async () => {
-    if (!selectedClient || !emailType || !context) {
-      alert('Please fill in all fields');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const client = clients.find(c => c.id === selectedClient);
-      const response = await axios.post(`${API}/draft-email`, {
-        client_id: selectedClient,
-        client_name: client.name,
-        context: context,
-        email_type: emailType
-      });
-      setDraftedEmail(response.data);
-    } catch (error) {
-      console.error('Error drafting email:', error);
-      alert('Error generating email draft');
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const selectedClientData = clients.find(c => c.id === selectedClient);
+  const getDrafts = () => communications.filter(c => c.comm_type === 'draft');
+  const getSent = () => communications.filter(c => c.comm_type === 'sent');
+  const getReceived = () => communications.filter(c => c.comm_type === 'received');
+
+  const getFilteredComms = (comms) => {
+    let filtered = [...comms];
+    if (filters.client_id !== 'all') {
+      filtered = filtered.filter(c => c.client_id === filters.client_id);
+    }
+    if (filters.channel !== 'all') {
+      filtered = filtered.filter(c => c.channel === filters.channel);
+    }
+    return filtered;
+  };
+
+  const handleSend = async () => {
+    if (!selectedComm) return;
+    setSending(true);
+    try {
+      await axios.patch(`${API}/communications/${selectedComm.id}/send`);
+      setShowSendDialog(false);
+      setSelectedComm(null);
+      fetchData();
+    } catch (error) {
+      console.error('Error sending communication:', error);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const getChannelIcon = (channel) => {
+    switch (channel) {
+      case 'email': return <Mail className="h-4 w-4" />;
+      case 'call': return <PhoneIcon className="h-4 w-4" />;
+      case 'meeting': return <Users className="h-4 w-4" />;
+      default: return <MessageSquare className="h-4 w-4" />;
+    }
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    return new Date(dateStr).toLocaleDateString('en-US', { 
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+    });
+  };
+
+  const getClientName = (clientId) => {
+    const client = clients.find(c => c.id === clientId);
+    return client?.name || 'Unknown Client';
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1B4F72]"></div>
+      </div>
+    );
+  }
+
+  const drafts = getFilteredComms(getDrafts());
+  const sent = getFilteredComms(getSent());
+  const received = getFilteredComms(getReceived());
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h2 className="text-3xl font-bold text-slate-900">Client Communications & Auto-Response</h2>
-        <p className="text-slate-600 mt-2">AI-powered email drafting and communication tracking</p>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Communications</h1>
+        <p className="text-slate-600 mt-1">Manage drafts, sent messages, and history</p>
       </div>
 
-      <Tabs defaultValue="draft" className="space-y-6">
-        <TabsList className="bg-white border border-slate-200">
-          <TabsTrigger value="draft">Draft Email</TabsTrigger>
-          <TabsTrigger value="history">Communication History</TabsTrigger>
-          <TabsTrigger value="weekly">Weekly Summary</TabsTrigger>
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="bg-white">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-50 rounded-lg">
+                <FileEdit className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-amber-600">{getDrafts().length}</p>
+                <p className="text-xs text-slate-500">Drafts</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-white">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-50 rounded-lg">
+                <Send className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-green-600">{getSent().length}</p>
+                <p className="text-xs text-slate-500">Sent</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-white">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-50 rounded-lg">
+                <MessageSquare className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-blue-600">{getReceived().length}</p>
+                <p className="text-xs text-slate-500">Received</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <Select value={filters.client_id} onValueChange={(v) => setFilters({...filters, client_id: v})}>
+          <SelectTrigger className="w-48 bg-white" data-testid="filter-client">
+            <SelectValue placeholder="Filter by client" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Clients</SelectItem>
+            {clients.map((client) => (
+              <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        
+        <Select value={filters.channel} onValueChange={(v) => setFilters({...filters, channel: v})}>
+          <SelectTrigger className="w-40 bg-white" data-testid="filter-channel">
+            <SelectValue placeholder="Channel" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Channels</SelectItem>
+            <SelectItem value="email">Email</SelectItem>
+            <SelectItem value="call">Call</SelectItem>
+            <SelectItem value="meeting">Meeting</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="bg-white border">
+          <TabsTrigger value="drafts" data-testid="tab-drafts">
+            Draft Queue ({drafts.length})
+          </TabsTrigger>
+          <TabsTrigger value="sent" data-testid="tab-sent">
+            Sent ({sent.length})
+          </TabsTrigger>
+          <TabsTrigger value="received" data-testid="tab-received">
+            Received ({received.length})
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="draft">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="bg-white border-slate-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-emerald-600" />
-                  AI Email Composer
-                </CardTitle>
-                <CardDescription>Generate context-aware emails using GPT-5.2</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label className="text-slate-700">Select Client</Label>
-                  <Select value={selectedClient} onValueChange={setSelectedClient}>
-                    <SelectTrigger className="bg-white border-slate-300">
-                      <SelectValue placeholder="Select a client" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white">
-                      {clients.map((client) => (
-                        <SelectItem key={client.id} value={client.id}>
-                          {client.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label className="text-slate-700">Email Type</Label>
-                  <Select value={emailType} onValueChange={setEmailType}>
-                    <SelectTrigger className="bg-white border-slate-300">
-                      <SelectValue placeholder="Select email type" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white">
-                      <SelectItem value="follow_up">Follow-up / Check-in</SelectItem>
-                      <SelectItem value="response">Response to Query</SelectItem>
-                      <SelectItem value="innovation_update">Innovation Update</SelectItem>
-                      <SelectItem value="policy_alert">Policy Alert</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label className="text-slate-700">Context / Details</Label>
-                  <Textarea
-                    placeholder="E.g., Following up on last week's QBR discussion about expanding to new locations..."
-                    value={context}
-                    onChange={(e) => setContext(e.target.value)}
-                    rows={5}
-                    className="bg-white border-slate-300"
-                  />
-                </div>
-
-                <Button 
-                  className="w-full bg-emerald-600 hover:bg-emerald-700" 
-                  onClick={handleDraftEmail}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <Loader className="h-4 w-4 mr-2 animate-spin" />
-                      Generating with AI...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Generate Email Draft
-                    </>
-                  )}
-                </Button>
+        {/* Drafts Tab */}
+        <TabsContent value="drafts" className="mt-6">
+          {drafts.length === 0 ? (
+            <Card className="bg-white">
+              <CardContent className="py-12 text-center">
+                <FileEdit className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                <p className="text-slate-500">No drafts pending review</p>
               </CardContent>
             </Card>
-
-            <Card className="bg-white border-slate-200">
-              <CardHeader>
-                <CardTitle>Email Preview</CardTitle>
-                <CardDescription>AI-generated draft ready for review</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!draftedEmail ? (
-                  <div className="text-center py-12">
-                    <Mail className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                    <p className="text-slate-600">Email draft will appear here</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div>
-                      <Label className="text-slate-700">Subject</Label>
-                      <Input value={draftedEmail.subject} className="bg-slate-50 border-slate-300" readOnly />
-                    </div>
-                    <div>
-                      <Label className="text-slate-700">Body</Label>
-                      <Textarea
-                        value={draftedEmail.body}
-                        rows={12}
-                        className="bg-slate-50 border-slate-300 font-sans"
-                        readOnly
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" className="flex-1">
-                        Edit
-                      </Button>
-                      <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700">
-                        <Send className="h-4 w-4 mr-2" />
-                        Send Email
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="history">
-          <Card className="bg-white border-slate-200">
-            <CardHeader>
-              <CardTitle>Communication History</CardTitle>
-              <CardDescription>
-                {selectedClientData ? `All communications with ${selectedClientData.name}` : 'Select a client'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {communications.length === 0 ? (
-                <div className="text-center py-12">
-                  <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                  <p className="text-slate-600">No communications recorded yet</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {communications.map((comm) => (
-                    <div key={comm.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-slate-700">{comm.comm_type}</Badge>
-                          <Badge className={
-                            comm.sentiment === 'positive' ? 'bg-emerald-100 text-emerald-700' :
-                            comm.sentiment === 'negative' ? 'bg-red-100 text-red-700' :
-                            'bg-slate-100 text-slate-700'
-                          }>
-                            {comm.sentiment}
-                          </Badge>
-                        </div>
-                        <span className="text-sm text-slate-500">{new Date(comm.created_at).toLocaleDateString()}</span>
+          ) : (
+            <div className="space-y-3">
+              {drafts.map((comm) => (
+                <Card key={comm.id} className="bg-white hover:shadow-md transition-shadow">
+                  <CardContent className="py-4">
+                    <div className="flex items-start gap-4">
+                      <div className="p-2 bg-amber-50 rounded-lg">
+                        {getChannelIcon(comm.channel)}
                       </div>
-                      {comm.subject && <h4 className="font-semibold text-slate-900 mb-2">{comm.subject}</h4>}
-                      <p className="text-slate-600 text-sm mb-2">{comm.summary}</p>
-                      {comm.action_items.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-slate-200">
-                          <p className="text-sm font-medium text-slate-700 mb-1">Action Items:</p>
-                          <ul className="list-disc list-inside text-sm text-slate-600">
-                            {comm.action_items.map((item, idx) => (
-                              <li key={idx}>{item}</li>
-                            ))}
-                          </ul>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <Badge variant="outline">{comm.channel}</Badge>
+                          {comm.ai_generated && (
+                            <Badge className="bg-[#85C1E9] text-[#1B4F72]">
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              AI Generated
+                            </Badge>
+                          )}
+                          <span className="text-sm text-slate-500">{getClientName(comm.client_id)}</span>
                         </div>
-                      )}
+                        
+                        <h3 className="font-medium text-slate-900">{comm.subject}</h3>
+                        <p className="text-sm text-slate-600 mt-1 line-clamp-2">{comm.body}</p>
+                        
+                        <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDate(comm.created_at)}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedComm(comm);
+                            setShowSendDialog(true);
+                          }}
+                        >
+                          Review
+                        </Button>
+                        <Button 
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => {
+                            setSelectedComm(comm);
+                            setShowSendDialog(true);
+                          }}
+                        >
+                          <Send className="h-4 w-4 mr-1" />
+                          Send
+                        </Button>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
 
-        <TabsContent value="weekly">
-          <Card className="bg-white border-slate-200">
-            <CardHeader>
-              <CardTitle>Weekly Client Summary</CardTitle>
-              <CardDescription>AI-generated intelligence report from call transcripts and emails</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-12">
-                <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                <p className="text-slate-600 mb-4">Generate AI-powered weekly summary</p>
-                <Button className="bg-emerald-600 hover:bg-emerald-700">
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Generate Summary
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Sent Tab */}
+        <TabsContent value="sent" className="mt-6">
+          {sent.length === 0 ? (
+            <Card className="bg-white">
+              <CardContent className="py-12 text-center">
+                <Send className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                <p className="text-slate-500">No sent communications</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {sent.map((comm) => (
+                <Card key={comm.id} className="bg-white">
+                  <CardContent className="py-4">
+                    <div className="flex items-start gap-4">
+                      <div className="p-2 bg-green-50 rounded-lg">
+                        {getChannelIcon(comm.channel)}
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <Badge className="bg-green-100 text-green-700">Sent</Badge>
+                          <Badge variant="outline">{comm.channel}</Badge>
+                          <span className="text-sm text-slate-500">{getClientName(comm.client_id)}</span>
+                        </div>
+                        
+                        <h3 className="font-medium text-slate-900">{comm.subject}</h3>
+                        <p className="text-sm text-slate-600 mt-1 line-clamp-2">{comm.body}</p>
+                        
+                        <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            Sent: {formatDate(comm.sent_at)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Received Tab */}
+        <TabsContent value="received" className="mt-6">
+          {received.length === 0 ? (
+            <Card className="bg-white">
+              <CardContent className="py-12 text-center">
+                <MessageSquare className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                <p className="text-slate-500">No received communications</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {received.map((comm) => (
+                <Card key={comm.id} className="bg-white">
+                  <CardContent className="py-4">
+                    <div className="flex items-start gap-4">
+                      <div className="p-2 bg-blue-50 rounded-lg">
+                        {getChannelIcon(comm.channel)}
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <Badge className="bg-blue-100 text-blue-700">Received</Badge>
+                          <Badge variant="outline">{comm.channel}</Badge>
+                          <span className="text-sm text-slate-500">{getClientName(comm.client_id)}</span>
+                        </div>
+                        
+                        <h3 className="font-medium text-slate-900">{comm.subject}</h3>
+                        <p className="text-sm text-slate-600 mt-1 line-clamp-2">{comm.body}</p>
+                        
+                        <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDate(comm.created_at)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
+
+      {/* Send Dialog */}
+      <Dialog open={showSendDialog} onOpenChange={setShowSendDialog}>
+        <DialogContent className="bg-white max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Review & Send</DialogTitle>
+          </DialogHeader>
+          {selectedComm && (
+            <div className="py-4 space-y-4">
+              <div>
+                <Label>To</Label>
+                <p className="mt-1 p-2 bg-slate-50 rounded border text-sm">
+                  {getClientName(selectedComm.client_id)}
+                </p>
+              </div>
+              <div>
+                <Label>Subject</Label>
+                <Input 
+                  value={selectedComm.subject} 
+                  readOnly 
+                  className="mt-1 bg-slate-50"
+                />
+              </div>
+              <div>
+                <Label>Message</Label>
+                <Textarea 
+                  value={selectedComm.body} 
+                  readOnly 
+                  className="mt-1 bg-slate-50 min-h-48"
+                />
+              </div>
+              {selectedComm.ai_generated && (
+                <div className="flex items-center gap-2 p-2 bg-[#85C1E9]/10 rounded-lg border border-[#85C1E9]/20">
+                  <Sparkles className="h-4 w-4 text-[#1B4F72]" />
+                  <span className="text-sm text-[#1B4F72]">This draft was generated by AI</span>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSendDialog(false)}>Cancel</Button>
+            <Button 
+              className="bg-green-600 hover:bg-green-700"
+              onClick={handleSend}
+              disabled={sending}
+            >
+              {sending ? 'Sending...' : 'Send Now'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
