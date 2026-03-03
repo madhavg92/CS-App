@@ -3,12 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { 
   Users, AlertTriangle, Phone, TrendingUp, TrendingDown,
-  Clock, ChevronRight, AlertCircle, CheckCircle2, ArrowUpRight
+  Clock, ChevronRight, AlertCircle, CheckCircle2, ArrowUpRight,
+  RefreshCw, FileText, Calendar, Upload
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { useAuth } from '../App';
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, 
+  Tooltip, ResponsiveContainer, Legend
+} from 'recharts';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -25,7 +30,11 @@ const DashboardPage = () => {
   });
   const [todayAlerts, setTodayAlerts] = useState([]);
   const [callList, setCallList] = useState([]);
+  const [performanceData, setPerformanceData] = useState([]);
+  const [denialCodesData, setDenialCodesData] = useState([]);
+  const [renewingClients, setRenewingClients] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [runningChecks, setRunningChecks] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
@@ -33,19 +42,94 @@ const DashboardPage = () => {
 
   const fetchDashboardData = async () => {
     try {
-      const [metricsRes, alertsRes, callListRes] = await Promise.all([
+      const [metricsRes, alertsRes, callListRes, perfRes, clientsRes] = await Promise.all([
         axios.get(`${API}/dashboard/metrics`),
-        axios.get(`${API}/alerts/today`),
-        axios.get(`${API}/followups/call-list`)
+        axios.get(`${API}/alerts?status=active`),
+        axios.get(`${API}/followups/call-list`),
+        axios.get(`${API}/performance`),
+        axios.get(`${API}/clients`)
       ]);
       
       setMetrics(metricsRes.data);
       setTodayAlerts(alertsRes.data.slice(0, 5));
       setCallList(callListRes.data);
+      
+      // Process performance data for charts
+      processPerformanceData(perfRes.data);
+      
+      // Count clients approaching renewal (within 60 days)
+      const now = new Date();
+      const renewing = clientsRes.data.filter(c => {
+        if (!c.contract_end) return false;
+        const endDate = new Date(c.contract_end);
+        const daysUntil = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
+        return daysUntil > 0 && daysUntil <= 60;
+      }).length;
+      setRenewingClients(renewing);
+      
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const processPerformanceData = (data) => {
+    // Group by week and calculate averages
+    const weeklyData = {};
+    const denialCodes = {};
+    
+    data.forEach(record => {
+      const date = new Date(record.period_end);
+      const weekKey = `${date.getMonth() + 1}/${date.getDate()}`;
+      
+      if (!weeklyData[weekKey]) {
+        weeklyData[weekKey] = { rates: [], sla: [] };
+      }
+      weeklyData[weekKey].rates.push(record.recovery_rate);
+      weeklyData[weekKey].sla.push(record.sla_compliance_pct);
+      
+      // Aggregate denial codes
+      if (record.top_denial_codes) {
+        Object.entries(record.top_denial_codes).forEach(([code, count]) => {
+          denialCodes[code] = (denialCodes[code] || 0) + count;
+        });
+      }
+    });
+    
+    // Convert to chart format
+    const chartData = Object.entries(weeklyData)
+      .slice(-8)
+      .map(([week, data]) => ({
+        week,
+        recoveryRate: Math.round(data.rates.reduce((a, b) => a + b, 0) / data.rates.length * 10) / 10,
+        slaCompliance: Math.round(data.sla.reduce((a, b) => a + b, 0) / data.sla.length * 10) / 10
+      }));
+    
+    setPerformanceData(chartData);
+    
+    // Top denial codes
+    const topCodes = Object.entries(denialCodes)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([code, count]) => ({ code, count }));
+    
+    setDenialCodesData(topCodes);
+  };
+
+  const runAlertChecks = async () => {
+    setRunningChecks(true);
+    try {
+      await Promise.all([
+        axios.post(`${API}/alerts/check-engagement`),
+        axios.post(`${API}/alerts/check-renewals`),
+        axios.post(`${API}/alerts/check-overdue-followups`)
+      ]);
+      fetchDashboardData();
+    } catch (error) {
+      console.error('Error running alert checks:', error);
+    } finally {
+      setRunningChecks(false);
     }
   };
 
@@ -57,18 +141,6 @@ const DashboardPage = () => {
       low: 'bg-slate-100 text-slate-600 border border-slate-200'
     };
     return colors[severity] || colors.low;
-  };
-
-  const getHealthColor = (score) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-amber-600';
-    return 'text-red-600';
-  };
-
-  const getHealthBadge = (score) => {
-    if (score >= 80) return 'bg-green-100 text-green-700 border-green-200';
-    if (score >= 60) return 'bg-amber-100 text-amber-700 border-amber-200';
-    return 'bg-red-100 text-red-700 border-red-200';
   };
 
   if (loading) {
@@ -86,6 +158,54 @@ const DashboardPage = () => {
         <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
         <p className="text-slate-600 mt-1">Welcome back, {user?.name}. Here's your CS overview.</p>
       </div>
+
+      {/* Quick Summary Banner */}
+      <Card className="bg-gradient-to-r from-[#1B4F72] to-[#154360] text-white border-0">
+        <CardContent className="py-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <p className="text-[#85C1E9] text-sm">Today's Summary</p>
+              <p className="text-lg">
+                You have <span className="font-bold">{metrics.active_alerts} active alerts</span>, 
+                <span className="font-bold"> {metrics.open_followups} follow-ups due</span>, and 
+                <span className="font-bold"> {renewingClients} clients approaching renewal</span>.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {user?.role === 'cs_lead' && (
+                <Button 
+                  variant="secondary"
+                  size="sm"
+                  className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+                  onClick={runAlertChecks}
+                  disabled={runningChecks}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${runningChecks ? 'animate-spin' : ''}`} />
+                  Run Alert Check
+                </Button>
+              )}
+              <Button 
+                variant="secondary"
+                size="sm"
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+                onClick={() => navigate('/reports')}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Generate Report
+              </Button>
+              <Button 
+                variant="secondary"
+                size="sm"
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+                onClick={() => navigate('/followups')}
+              >
+                <Phone className="h-4 w-4 mr-2" />
+                View Call List
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -176,14 +296,100 @@ const DashboardPage = () => {
         </Card>
       </div>
 
-      {/* Main Content Grid */}
+      {/* Performance Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recovery Rate Trends */}
+        <Card className="bg-white border-slate-200" data-testid="performance-trends">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Performance Trends</CardTitle>
+            <CardDescription>Recovery rate & SLA compliance over time</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {performanceData.length === 0 ? (
+              <div className="h-64 flex flex-col items-center justify-center text-slate-500">
+                <Upload className="h-12 w-12 text-slate-300 mb-3" />
+                <p>Upload your first Ops data file to see metrics here.</p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="mt-3"
+                  onClick={() => navigate('/reports')}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Ops Data
+                </Button>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={performanceData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="week" tick={{ fontSize: 12 }} stroke="#94a3b8" />
+                  <YAxis domain={[70, 100]} tick={{ fontSize: 12 }} stroke="#94a3b8" />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0' }}
+                    formatter={(value) => [`${value}%`, '']}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="recoveryRate" 
+                    stroke="#1B4F72" 
+                    strokeWidth={2}
+                    name="Recovery Rate"
+                    dot={{ fill: '#1B4F72' }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="slaCompliance" 
+                    stroke="#85C1E9" 
+                    strokeWidth={2}
+                    name="SLA Compliance"
+                    dot={{ fill: '#85C1E9' }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Top Denial Codes */}
+        <Card className="bg-white border-slate-200" data-testid="denial-codes">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Top Denial Codes</CardTitle>
+            <CardDescription>Aggregated across all clients</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {denialCodesData.length === 0 ? (
+              <div className="h-64 flex flex-col items-center justify-center text-slate-500">
+                <FileText className="h-12 w-12 text-slate-300 mb-3" />
+                <p>No denial code data available yet.</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={denialCodesData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis type="number" tick={{ fontSize: 12 }} stroke="#94a3b8" />
+                  <YAxis dataKey="code" type="category" tick={{ fontSize: 12 }} stroke="#94a3b8" width={60} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0' }}
+                    formatter={(value) => [value, 'Count']}
+                  />
+                  <Bar dataKey="count" fill="#1B4F72" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Alerts and Call List */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Today's Alerts */}
         <Card className="bg-white border-slate-200" data-testid="todays-alerts">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-lg">Today's Alerts</CardTitle>
+                <CardTitle className="text-lg">Active Alerts</CardTitle>
                 <CardDescription>Sorted by severity</CardDescription>
               </div>
               <Button 
@@ -200,7 +406,8 @@ const DashboardPage = () => {
             {todayAlerts.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-green-500" />
-                <p>No new alerts today</p>
+                <p className="font-medium">All clear!</p>
+                <p className="text-sm">No active alerts at the moment.</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -254,7 +461,8 @@ const DashboardPage = () => {
             {callList.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 <Phone className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-                <p>No calls scheduled for today</p>
+                <p className="font-medium">No calls scheduled</p>
+                <p className="text-sm">Great job staying on top of follow-ups!</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -289,46 +497,6 @@ const DashboardPage = () => {
           </CardContent>
         </Card>
       </div>
-
-      {/* Quick Actions */}
-      {user?.role !== 'ops' && (
-        <Card className="bg-gradient-to-r from-[#1B4F72] to-[#154360] text-white border-0">
-          <CardContent className="py-6">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold">Quick Actions</h3>
-                <p className="text-[#85C1E9] text-sm">Common tasks at your fingertips</p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button 
-                  variant="secondary"
-                  className="bg-white/10 hover:bg-white/20 text-white border-white/20"
-                  onClick={() => navigate('/alerts')}
-                >
-                  <AlertTriangle className="h-4 w-4 mr-2" />
-                  Review Alerts
-                </Button>
-                <Button 
-                  variant="secondary"
-                  className="bg-white/10 hover:bg-white/20 text-white border-white/20"
-                  onClick={() => navigate('/communications?type=draft')}
-                >
-                  <Clock className="h-4 w-4 mr-2" />
-                  Draft Queue
-                </Button>
-                <Button 
-                  variant="secondary"
-                  className="bg-white/10 hover:bg-white/20 text-white border-white/20"
-                  onClick={() => navigate('/reports')}
-                >
-                  <TrendingUp className="h-4 w-4 mr-2" />
-                  Generate Report
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 };

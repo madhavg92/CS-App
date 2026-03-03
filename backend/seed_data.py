@@ -15,7 +15,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 from motor.motor_asyncio import AsyncIOMotorClient
-import hashlib
+import bcrypt
 import uuid
 
 mongo_url = os.environ['MONGO_URL']
@@ -23,7 +23,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def random_date(start_days_ago: int, end_days_ago: int = 0) -> str:
     days_ago = random.randint(end_days_ago, start_days_ago)
@@ -35,18 +35,20 @@ async def seed_data():
     # Clear existing data
     collections = ['users', 'clients', 'client_contacts', 'performance_records', 
                    'alerts', 'communications', 'followups', 'prompt_templates', 
-                   'alert_thresholds', 'crm_contacts', 'crm_deals', 'crm_tickets']
+                   'alert_thresholds', 'crm_contacts', 'crm_deals', 'crm_tickets',
+                   'audit_logs', 'scheduled_reviews', 'team_members', 'lobs', 
+                   'client_lob_mappings', 'integrations']
     
     for coll in collections:
         await db[coll].delete_many({})
     print("Cleared existing data")
     
-    # Create Users
+    # Create Users - Anka team structure
     users = [
         {
             "id": str(uuid.uuid4()),
-            "name": "Sarah Mitchell",
-            "email": "sarah.mitchell@anka.health",
+            "name": "Gayatri Garg",
+            "email": "gayatri.garg@anka.health",
             "password_hash": hash_password("password123"),
             "role": "cs_lead",
             "assigned_clients": [],
@@ -55,8 +57,18 @@ async def seed_data():
         },
         {
             "id": str(uuid.uuid4()),
-            "name": "James Rodriguez",
-            "email": "james.rodriguez@anka.health",
+            "name": "Gurpreet Sahni",
+            "email": "gurpreet.sahni@anka.health",
+            "password_hash": hash_password("password123"),
+            "role": "cs_lead",
+            "assigned_clients": [],
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "name": "Priya Sharma",
+            "email": "priya.sharma@anka.health",
             "password_hash": hash_password("password123"),
             "role": "csm",
             "assigned_clients": [],
@@ -65,8 +77,8 @@ async def seed_data():
         },
         {
             "id": str(uuid.uuid4()),
-            "name": "Emily Chen",
-            "email": "emily.chen@anka.health",
+            "name": "Rahul Verma",
+            "email": "rahul.verma@anka.health",
             "password_hash": hash_password("password123"),
             "role": "csm",
             "assigned_clients": [],
@@ -75,8 +87,8 @@ async def seed_data():
         },
         {
             "id": str(uuid.uuid4()),
-            "name": "Michael Thompson",
-            "email": "michael.thompson@anka.health",
+            "name": "Ankit Patel",
+            "email": "ankit.patel@anka.health",
             "password_hash": hash_password("password123"),
             "role": "ops",
             "assigned_clients": [],
@@ -101,63 +113,77 @@ async def seed_data():
     csm_ids = [u['id'] for u in users if u['role'] == 'csm']
     lead_ids = [u['id'] for u in users if u['role'] == 'cs_lead']
     
-    # Create Clients
+    # Create Clients - Healthcare RCM clients
     client_data = [
         {
-            "name": "Memorial Health System",
-            "services": ["EV", "Prior Auth", "Coding", "AR"],
+            "name": "Tricity Medical Center",
+            "services": ["EV", "Prior Auth", "Coding", "AR", "Denial Management"],
             "status": "active",
-            "health": 92,
-            "renewal_days": 180
-        },
-        {
-            "name": "Valley Medical Center",
-            "services": ["Prior Auth", "Billing", "AR", "Payment Posting"],
-            "status": "active",
-            "health": 78,
-            "renewal_days": 45
-        },
-        {
-            "name": "Sunrise Healthcare Partners",
-            "services": ["EV", "Coding", "Billing"],
-            "status": "at-risk",
-            "health": 58,
-            "renewal_days": 30
-        },
-        {
-            "name": "Pacific Northwest Medical Group",
-            "services": ["Prior Auth", "AR", "Payment Posting"],
-            "status": "active",
-            "health": 85,
+            "health": 88,
             "renewal_days": 120
         },
         {
-            "name": "Great Lakes Hospital Network",
-            "services": ["EV", "Prior Auth", "Coding", "Billing", "AR"],
+            "name": "Valley Regional Hospital",
+            "services": ["Prior Auth", "Billing", "AR", "Payment Posting"],
             "status": "active",
-            "health": 88,
-            "renewal_days": 200
+            "health": 75,
+            "renewal_days": 45
         },
         {
-            "name": "Midwest Regional Medical",
+            "name": "Sunrise Family Practice Group",
+            "services": ["EV", "Coding", "Billing"],
+            "status": "at-risk",
+            "health": 58,
+            "renewal_days": 28
+        },
+        {
+            "name": "Northwest Orthopedic Specialists",
+            "services": ["Prior Auth", "AR", "Denial Management"],
+            "status": "active",
+            "health": 82,
+            "renewal_days": 180
+        },
+        {
+            "name": "Great Plains Rural Health Network",
+            "services": ["EV", "Prior Auth", "Coding", "Billing", "AR"],
+            "status": "active",
+            "health": 91,
+            "renewal_days": 240
+        },
+        {
+            "name": "Midwest Cardiology Associates",
             "services": ["Coding", "Billing", "AR"],
             "status": "at-risk",
             "health": 62,
-            "renewal_days": 60
+            "renewal_days": 55
         },
         {
-            "name": "Atlantic Healthcare Alliance",
-            "services": ["EV", "Prior Auth"],
+            "name": "Atlantic Coast Medical Group",
+            "services": ["EV", "Prior Auth", "Payment Posting"],
             "status": "active",
-            "health": 95,
+            "health": 94,
             "renewal_days": 300
         },
         {
-            "name": "Desert Valley Physicians",
-            "services": ["Prior Auth", "Coding", "AR", "Payment Posting"],
+            "name": "Desert Valley Physicians Network",
+            "services": ["Prior Auth", "Coding", "AR", "Denial Management"],
             "status": "active",
-            "health": 81,
+            "health": 79,
             "renewal_days": 90
+        },
+        {
+            "name": "Mountain View Community Hospital",
+            "services": ["EV", "Billing", "AR", "Payment Posting"],
+            "status": "active",
+            "health": 85,
+            "renewal_days": 150
+        },
+        {
+            "name": "Lakeside Internal Medicine",
+            "services": ["Prior Auth", "Coding", "Billing"],
+            "status": "active",
+            "health": 72,
+            "renewal_days": 65
         }
     ]
     
@@ -174,7 +200,7 @@ async def seed_data():
             "contracted_services": c['services'],
             "sla_targets": {
                 "recovery_rate": random.randint(82, 90),
-                "error_rate": random.uniform(1.5, 3.0),
+                "error_rate": round(random.uniform(1.5, 3.0), 1),
                 "turnaround_days": random.randint(2, 5)
             },
             "status": c['status'],
@@ -196,36 +222,43 @@ async def seed_data():
         assigned = [c['id'] for j, c in enumerate(clients) if j % len(csm_ids) == i]
         await db.users.update_one({"id": csm_id}, {"$set": {"assigned_clients": assigned}})
     
-    # Create Client Contacts
-    contact_names = [
+    # Create Client Contacts with realistic healthcare titles
+    contact_templates = [
         ("Dr. Robert Williams", "Chief Medical Officer", "decision-maker"),
         ("Jennifer Adams", "VP of Revenue Cycle", "decision-maker"),
-        ("Mark Stevens", "Director of Operations", "influencer"),
+        ("Mark Stevens", "Director of Patient Financial Services", "influencer"),
         ("Lisa Chen", "Billing Manager", "operations"),
-        ("David Park", "IT Director", "influencer"),
-        ("Amanda Foster", "Accounts Receivable Lead", "billing"),
-        ("Chris Martinez", "Clinical Operations Manager", "operations"),
-        ("Rachel Kim", "Finance Director", "influencer")
+        ("David Park", "HIM Director", "influencer"),
+        ("Amanda Foster", "AR Manager", "billing"),
+        ("Chris Martinez", "Practice Administrator", "operations"),
+        ("Rachel Kim", "CFO", "decision-maker"),
+        ("Michael Brown", "Compliance Officer", "influencer"),
+        ("Sarah Johnson", "Revenue Cycle Analyst", "operations")
     ]
     
     contacts = []
     for client in clients:
-        num_contacts = random.randint(3, 6)
-        selected_contacts = random.sample(contact_names, num_contacts)
+        num_contacts = random.randint(4, 7)
+        selected_contacts = random.sample(contact_templates, num_contacts)
         
         for name, title, role in selected_contacts:
+            # Randomize engagement dates
+            has_recent_email = random.random() > 0.3
+            has_recent_call = random.random() > 0.4
+            has_recent_meeting = random.random() > 0.5
+            
             contact = {
                 "id": str(uuid.uuid4()),
                 "client_id": client['id'],
                 "name": name,
                 "title": title,
-                "email": f"{name.lower().replace(' ', '.').replace('dr. ', '')}@{client['name'].lower().replace(' ', '')}.com",
+                "email": f"{name.lower().replace(' ', '.').replace('dr. ', '')}@{client['name'].lower().replace(' ', '').replace(',', '')[:20]}.com",
                 "phone": f"({random.randint(200,999)}) {random.randint(100,999)}-{random.randint(1000,9999)}",
                 "role_type": role,
-                "anka_relationship_owner": random.choice(csm_ids),
-                "last_email_date": random_date(45, 5) if random.random() > 0.3 else None,
-                "last_call_date": random_date(60, 10) if random.random() > 0.4 else None,
-                "last_meeting_date": random_date(90, 20) if random.random() > 0.5 else None,
+                "anka_relationship_owner": random.choice(csm_ids + lead_ids),
+                "last_email_date": random_date(35, 3) if has_recent_email else random_date(90, 40),
+                "last_call_date": random_date(45, 5) if has_recent_call else random_date(120, 50),
+                "last_meeting_date": random_date(60, 10) if has_recent_meeting else random_date(180, 70),
                 "notes": None,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
@@ -234,41 +267,45 @@ async def seed_data():
     await db.client_contacts.insert_many(contacts)
     print(f"Created {len(contacts)} contacts")
     
-    # Create Performance Records
-    denial_codes = ["CO-4", "CO-16", "CO-45", "PR-1", "PR-2", "CO-97", "CO-50", "PI-23", "CO-29", "MA-130"]
-    payers = ["Medicare", "Medicaid", "Blue Cross", "Aetna", "UnitedHealth", "Cigna", "Humana"]
+    # Create Performance Records with realistic RCM industry numbers
+    denial_codes = ["CO-4", "CO-16", "CO-45", "PR-1", "PR-2", "CO-97", "CO-50", "PI-23", "CO-29", "MA-130", "N30", "N362"]
+    payers = ["Medicare", "Medicaid", "BCBS", "United Healthcare", "Aetna", "Cigna", "Humana", "Anthem"]
     
     performance_records = []
     for client in clients:
-        # Create 6 months of performance data
-        for months_ago in range(6):
+        # Create 8 months of performance data
+        for months_ago in range(8):
             period_end = datetime.now(timezone.utc) - timedelta(days=months_ago * 30)
             period_start = period_end - timedelta(days=30)
             
-            base_rate = 80 + random.uniform(-5, 15)
+            # Realistic RCM recovery rates: 78-92%
+            base_rate = 78 + random.uniform(0, 14)
             if client['status'] == 'at-risk':
-                base_rate -= random.uniform(5, 15)
+                base_rate -= random.uniform(3, 10)
             
-            denials_worked = random.randint(800, 3000)
-            recovery_rate = min(95, max(60, base_rate + random.uniform(-3, 3)))
+            denials_worked = random.randint(1200, 4500)
+            recovery_rate = min(92, max(70, base_rate + random.uniform(-3, 3)))
             
-            # Generate denial codes
+            # Generate denial codes with realistic distribution
             top_codes = {}
-            for code in random.sample(denial_codes, random.randint(3, 6)):
-                top_codes[code] = random.randint(20, 200)
+            for code in random.sample(denial_codes, random.randint(4, 7)):
+                top_codes[code] = random.randint(30, 280)
             
             # Generate payer breakdown
             payer_breakdown = {}
-            total_recovered = denials_worked * random.uniform(150, 400)
+            total_recovered = denials_worked * random.uniform(180, 450)
             remaining = total_recovered
-            selected_payers = random.sample(payers, random.randint(3, 5))
+            selected_payers = random.sample(payers, random.randint(4, 6))
             for i, payer in enumerate(selected_payers):
                 if i == len(selected_payers) - 1:
                     payer_breakdown[payer] = round(remaining, 2)
                 else:
-                    amount = remaining * random.uniform(0.15, 0.4)
+                    amount = remaining * random.uniform(0.12, 0.35)
                     payer_breakdown[payer] = round(amount, 2)
                     remaining -= amount
+            
+            # Realistic SLA compliance: 88-99%
+            sla_compliance = random.uniform(88, 99)
             
             record = {
                 "id": str(uuid.uuid4()),
@@ -278,8 +315,8 @@ async def seed_data():
                 "denials_worked": denials_worked,
                 "dollars_recovered": round(total_recovered, 2),
                 "recovery_rate": round(recovery_rate, 2),
-                "sla_compliance_pct": round(random.uniform(88, 99), 2),
-                "error_rate": round(random.uniform(0.5, 3.5), 2),
+                "sla_compliance_pct": round(sla_compliance, 2),
+                "error_rate": round(random.uniform(0.8, 3.2), 2),
                 "top_denial_codes": top_codes,
                 "payer_breakdown": payer_breakdown,
                 "created_at": period_end.isoformat()
@@ -292,12 +329,10 @@ async def seed_data():
     # Create Alerts
     alert_types = [
         ("engagement_gap", "high", "No contact with decision maker in 21 days"),
-        ("renewal", "critical", "Contract renewal in 28 days - no QBR scheduled"),
-        ("performance_decline", "high", "Recovery rate dropped 8% vs prior period"),
-        ("followup_overdue", "medium", "Follow-up item open for 12 days"),
+        ("renewal", "critical", "Contract renewal approaching - QBR needed"),
+        ("performance_decline", "high", "Recovery rate declined vs prior period"),
+        ("followup_overdue", "medium", "Follow-up item overdue"),
         ("engagement_gap", "medium", "No contact with influencer in 35 days"),
-        ("scope_creep", "medium", "Client requesting services outside contract"),
-        ("frustration", "high", "Negative sentiment detected in recent communications")
     ]
     
     alerts = []
@@ -317,8 +352,8 @@ async def seed_data():
                 "client_name": client['name'],
                 "alert_type": alert_type,
                 "severity": severity,
-                "title": title,
-                "description": f"Automated alert generated for {client['name']}. Review and take action.",
+                "title": f"{title} - {client['name']}",
+                "description": f"Automated alert for {client['name']}. Review and take action.",
                 "trigger_data": {"auto_generated": True},
                 "status": status,
                 "assigned_to": client['assigned_csm'],
@@ -341,9 +376,11 @@ async def seed_data():
         ("Send performance summary", "Share monthly performance metrics", "email_sufficient"),
         ("Address billing inquiry", "Respond to questions about invoice", "email_sufficient"),
         ("Introduce new team member", "Connect client with new account manager", "call_required"),
-        ("Follow up on training request", "Schedule training session for new features", "email_sufficient"),
+        ("Follow up on training request", "Schedule training session for new processes", "email_sufficient"),
         ("Discuss expansion opportunity", "Present additional service options", "call_required"),
-        ("Resolve SLA concern", "Address client concerns about turnaround time", "call_required")
+        ("Resolve SLA concern", "Address client concerns about turnaround time", "call_required"),
+        ("Review denial trends", "Analyze top denial codes and action plan", "call_required"),
+        ("Payer contract update", "Discuss payer contract changes", "email_sufficient")
     ]
     
     followups = []
@@ -352,7 +389,7 @@ async def seed_data():
         
         for _ in range(num_followups):
             desc, action, category = random.choice(followup_descriptions)
-            days_open = random.randint(1, 15)
+            days_open = random.randint(1, 18)
             priority_level = random.randint(1, 5)
             
             if days_open > 7 or priority_level >= 4:
@@ -391,12 +428,14 @@ async def seed_data():
         "Team Introduction",
         "Service Enhancement Proposal",
         "RE: Contract Discussion",
-        "Action Items from Today's Call"
+        "Action Items from Today's Call",
+        "Denial Analysis Report",
+        "Payer Update Summary"
     ]
     
     communications = []
     for client in clients:
-        num_comms = random.randint(3, 8)
+        num_comms = random.randint(4, 10)
         
         for _ in range(num_comms):
             comm_type = random.choice(["sent", "sent", "received", "draft"])
@@ -409,7 +448,7 @@ async def seed_data():
                 "comm_type": comm_type,
                 "channel": channel,
                 "subject": random.choice(comm_subjects),
-                "body": f"Communication regarding {client['name']} business operations. This is sample content for demonstration purposes.",
+                "body": f"Communication regarding {client['name']} revenue cycle management operations.",
                 "ai_generated": random.random() > 0.7,
                 "template_used": None,
                 "created_by": client['assigned_csm'],
@@ -421,6 +460,53 @@ async def seed_data():
     if communications:
         await db.communications.insert_many(communications)
     print(f"Created {len(communications)} communications")
+    
+    # Create scheduled reviews
+    reviews = []
+    for client in clients[:6]:  # Create reviews for first 6 clients
+        review = {
+            "id": str(uuid.uuid4()),
+            "client_id": client['id'],
+            "client_name": client['name'],
+            "review_type": random.choice(["weekly", "monthly", "qbr"]),
+            "scheduled_date": (datetime.now(timezone.utc) + timedelta(days=random.randint(3, 30))).strftime("%Y-%m-%d"),
+            "scheduled_time": f"{random.randint(9, 16)}:00",
+            "duration_minutes": random.choice([30, 60, 90]),
+            "attendee_ids": [],
+            "attendees": ["Gayatri Garg", random.choice(["Priya Sharma", "Rahul Verma"])],
+            "status": "scheduled",
+            "notes": None,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        reviews.append(review)
+    
+    if reviews:
+        await db.scheduled_reviews.insert_many(reviews)
+    print(f"Created {len(reviews)} scheduled reviews")
+    
+    # Create LOBs
+    lobs = [
+        {"id": str(uuid.uuid4()), "name": "EV", "description": "Eligibility Verification", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Prior Auth", "description": "Prior Authorization", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Coding", "description": "Medical Coding", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Billing", "description": "Medical Billing", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "AR", "description": "Accounts Receivable", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Payment Posting", "description": "Payment Posting & Reconciliation", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Denial Management", "description": "Denial Appeals & Management", "created_at": datetime.now(timezone.utc).isoformat()}
+    ]
+    await db.lobs.insert_many(lobs)
+    print(f"Created {len(lobs)} LOBs")
+    
+    # Create team members
+    team_members = [
+        {"id": str(uuid.uuid4()), "name": "Gayatri Garg", "role": "manager", "email": "gayatri.garg@anka.health", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Gurpreet Sahni", "role": "manager", "email": "gurpreet.sahni@anka.health", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Priya Sharma", "role": "supervisor", "email": "priya.sharma@anka.health", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Rahul Verma", "role": "supervisor", "email": "rahul.verma@anka.health", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "name": "Ankit Patel", "role": "team_lead", "email": "ankit.patel@anka.health", "created_at": datetime.now(timezone.utc).isoformat()}
+    ]
+    await db.team_members.insert_many(team_members)
+    print(f"Created {len(team_members)} team members")
     
     # Create default alert thresholds
     default_threshold = {
@@ -438,13 +524,25 @@ async def seed_data():
     await db.alert_thresholds.insert_one(default_threshold)
     print("Created default alert thresholds")
     
-    print("\n✅ Data seed completed successfully!")
+    # Create default integrations
+    integrations = [
+        {"id": str(uuid.uuid4()), "integration_name": "microsoft_365", "connection_status": "disconnected", "config": {"tenant_id": "", "client_id": ""}, "last_sync": None, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "integration_name": "hubspot", "connection_status": "disconnected", "config": {"api_key": ""}, "last_sync": None, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "integration_name": "google_calendar", "connection_status": "disconnected", "config": {}, "last_sync": None, "created_at": datetime.now(timezone.utc).isoformat()}
+    ]
+    await db.integrations.insert_many(integrations)
+    print(f"Created {len(integrations)} integrations")
+    
+    print("\n" + "="*50)
+    print("Data seed completed successfully!")
+    print("="*50)
     print("\nLogin credentials:")
     print("  Admin: admin@anka.health / admin123")
-    print("  CS Lead: sarah.mitchell@anka.health / password123")
-    print("  CSM: james.rodriguez@anka.health / password123")
-    print("  CSM: emily.chen@anka.health / password123")
-    print("  Ops: michael.thompson@anka.health / password123")
+    print("  CS Lead: gayatri.garg@anka.health / password123")
+    print("  CS Lead: gurpreet.sahni@anka.health / password123")
+    print("  CSM: priya.sharma@anka.health / password123")
+    print("  CSM: rahul.verma@anka.health / password123")
+    print("  Ops: ankit.patel@anka.health / password123")
 
 if __name__ == "__main__":
     asyncio.run(seed_data())

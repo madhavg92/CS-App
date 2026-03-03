@@ -13,9 +13,13 @@ from datetime import datetime, timezone, timedelta
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 import re
 import jwt
-import hashlib
 import io
 import csv
+import json
+import bcrypt
+import asyncio
+from fastapi.responses import StreamingResponse
+import openpyxl
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -317,15 +321,89 @@ class PHIRedactionLog(BaseModel):
     context: str
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+# Audit Log Model
+class AuditLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    user_name: str
+    action_type: str  # ai_generation, report_download, alert_action, communication_send, data_upload
+    resource_type: str
+    resource_id: Optional[str] = None
+    details: Dict[str, Any] = {}
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# Scheduled Review Model (for Calendar)
+class ScheduledReview(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    review_type: str  # weekly, monthly, qbr
+    scheduled_date: str
+    scheduled_time: str
+    duration_minutes: int = 60
+    attendee_ids: List[str] = []
+    attendees: List[str] = []  # Names for display
+    status: str = "scheduled"  # scheduled, completed, cancelled
+    notes: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# Team Member Model (for Org Mapping)
+class TeamMember(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    role: str  # manager, supervisor, team_lead
+    email: str
+    phone: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# LOB Model
+class LOB(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# Client LOB Mapping
+class ClientLOBMapping(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    lob_id: str
+    lob_name: str
+    anka_team_members: List[str] = []  # team member IDs
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# Integration Config
+class IntegrationConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    integration_name: str
+    connection_status: str = "disconnected"  # connected, disconnected, error
+    config: Dict[str, Any] = {}
+    last_sync: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash password using bcrypt"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return hash_password(password) == password_hash
+    """Verify password against bcrypt hash"""
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    except Exception:
+        # Fallback for legacy SHA-256 hashes during migration
+        import hashlib
+        return hashlib.sha256(password.encode()).hexdigest() == password_hash
 
 def create_token(user_id: str, email: str, role: str) -> str:
     payload = {
@@ -392,6 +470,18 @@ async def log_phi_redactions(redactions: List[dict]):
         for r in redactions:
             log = PHIRedactionLog(**r)
             await db.phi_redaction_logs.insert_one(log.model_dump())
+
+async def log_audit(user_id: str, user_name: str, action_type: str, resource_type: str, resource_id: str = None, details: dict = None):
+    """Log an audit entry"""
+    audit = AuditLog(
+        user_id=user_id,
+        user_name=user_name,
+        action_type=action_type,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        details=details or {}
+    )
+    await db.audit_logs.insert_one(audit.model_dump())
 
 # AI Helper
 async def generate_with_ai(prompt: str, system_message: str = "You are a helpful AI assistant for healthcare customer success operations. Be professional, accurate, and reference specific data when provided.") -> str:
@@ -489,13 +579,23 @@ async def calculate_priority_score(followup: dict) -> float:
         
         # Renewal proximity (weight: 0.2)
         if client.get('contract_end'):
-            days_to_renewal = (datetime.fromisoformat(client['contract_end'].replace('Z', '+00:00')) - datetime.now(timezone.utc)).days
-            if days_to_renewal <= 30:
-                score += 10 * 0.2
-            elif days_to_renewal <= 60:
-                score += 7 * 0.2
-            elif days_to_renewal <= 90:
-                score += 4 * 0.2
+            try:
+                contract_end_str = client['contract_end']
+                # Handle various date formats
+                if 'T' in contract_end_str or '+' in contract_end_str or 'Z' in contract_end_str:
+                    contract_end = datetime.fromisoformat(contract_end_str.replace('Z', '+00:00'))
+                else:
+                    # Simple date string like "2024-01-01"
+                    contract_end = datetime.fromisoformat(contract_end_str + "T00:00:00+00:00")
+                days_to_renewal = (contract_end - datetime.now(timezone.utc)).days
+                if days_to_renewal <= 30:
+                    score += 10 * 0.2
+                elif days_to_renewal <= 60:
+                    score += 7 * 0.2
+                elif days_to_renewal <= 90:
+                    score += 4 * 0.2
+            except Exception:
+                pass  # Skip renewal calculation if date parsing fails
     
     # Priority level (weight: 0.2)
     priority_level = followup.get('priority_level', 3)
@@ -769,16 +869,23 @@ async def upload_ops_data(file: UploadFile = File(...), user: dict = Depends(req
         raise HTTPException(status_code=400, detail="Only CSV and Excel files are supported")
     
     content = await file.read()
+    rows = []
     
     try:
-        # Parse CSV
+        # Parse CSV or Excel
         if file.filename.endswith('.csv'):
             decoded = content.decode('utf-8')
             reader = csv.DictReader(io.StringIO(decoded))
             rows = list(reader)
         else:
-            # For Excel, we'd need openpyxl - simplified to CSV for now
-            raise HTTPException(status_code=400, detail="Please use CSV format")
+            # Parse Excel file
+            workbook = openpyxl.load_workbook(io.BytesIO(content))
+            sheet = workbook.active
+            headers = [cell.value for cell in sheet[1]]
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                if any(row):  # Skip empty rows
+                    row_dict = {headers[i]: row[i] for i in range(len(headers)) if headers[i]}
+                    rows.append(row_dict)
         
         required_columns = ['client_name', 'period_start', 'period_end', 'denials_worked', 'dollars_recovered', 'recovery_rate', 'sla_compliance', 'error_rate']
         
@@ -805,23 +912,27 @@ async def upload_ops_data(file: UploadFile = File(...), user: dict = Depends(req
                 
                 if row.get('top_denial_codes'):
                     try:
-                        import json
-                        top_denial_codes = json.loads(row['top_denial_codes'])
+                        if isinstance(row['top_denial_codes'], str):
+                            top_denial_codes = json.loads(row['top_denial_codes'])
+                        elif isinstance(row['top_denial_codes'], dict):
+                            top_denial_codes = row['top_denial_codes']
                     except:
                         pass
                 
                 if row.get('payer_breakdown'):
                     try:
-                        import json
-                        payer_breakdown = json.loads(row['payer_breakdown'])
+                        if isinstance(row['payer_breakdown'], str):
+                            payer_breakdown = json.loads(row['payer_breakdown'])
+                        elif isinstance(row['payer_breakdown'], dict):
+                            payer_breakdown = row['payer_breakdown']
                     except:
                         pass
                 
                 record = PerformanceRecord(
                     client_id=client['id'],
-                    period_start=row['period_start'],
-                    period_end=row['period_end'],
-                    denials_worked=int(row['denials_worked']),
+                    period_start=str(row['period_start']),
+                    period_end=str(row['period_end']),
+                    denials_worked=int(float(row['denials_worked'])),
                     dollars_recovered=float(row['dollars_recovered']),
                     recovery_rate=float(row['recovery_rate']),
                     sla_compliance_pct=float(row['sla_compliance']),
@@ -836,6 +947,13 @@ async def upload_ops_data(file: UploadFile = File(...), user: dict = Depends(req
                 
             except Exception as e:
                 errors.append(f"Row {i+1}: {str(e)}")
+        
+        # Log audit
+        await log_audit(user['id'], user['name'], 'data_upload', 'performance_records', None, {
+            'file_name': file.filename,
+            'records_created': records_created,
+            'errors_count': len(errors)
+        })
         
         return {
             "message": f"Uploaded {records_created} records",
@@ -1338,7 +1456,13 @@ async def check_renewal_alerts(user: dict = Depends(require_role(["cs_lead"]))):
         if not client.get('contract_end'):
             continue
         
-        contract_end = datetime.fromisoformat(client['contract_end'].replace('Z', '+00:00'))
+        contract_end_str = client['contract_end']
+        # Handle various date formats
+        if 'T' in contract_end_str or '+' in contract_end_str or 'Z' in contract_end_str:
+            contract_end = datetime.fromisoformat(contract_end_str.replace('Z', '+00:00'))
+        else:
+            # Simple date string like "2024-01-01"
+            contract_end = datetime.fromisoformat(contract_end_str + "T00:00:00+00:00")
         days_until = (contract_end - now).days
         
         # Get threshold settings
@@ -1502,8 +1626,335 @@ async def get_dashboard_metrics(user: dict = Depends(require_auth)):
     }
 
 # =============================================================================
-# ROOT & HEALTH
+# AUDIT LOGS
 # =============================================================================
+
+@api_router.get("/audit-logs")
+async def get_audit_logs(
+    user_id: Optional[str] = None,
+    action_type: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 100,
+    admin: dict = Depends(require_role(["cs_lead"]))
+):
+    """Get audit logs with filters"""
+    query = {}
+    if user_id:
+        query["user_id"] = user_id
+    if action_type:
+        query["action_type"] = action_type
+    if start_date:
+        query["timestamp"] = {"$gte": start_date}
+    if end_date:
+        if "timestamp" in query:
+            query["timestamp"]["$lte"] = end_date
+        else:
+            query["timestamp"] = {"$lte": end_date}
+    
+    logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
+    return logs
+
+# =============================================================================
+# SCHEDULED REVIEWS (Calendar)
+# =============================================================================
+
+@api_router.get("/reviews")
+async def get_reviews(
+    client_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: dict = Depends(require_auth)
+):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    if start_date:
+        query["scheduled_date"] = {"$gte": start_date}
+    if end_date:
+        if "scheduled_date" in query:
+            query["scheduled_date"]["$lte"] = end_date
+        else:
+            query["scheduled_date"] = {"$lte": end_date}
+    
+    reviews = await db.scheduled_reviews.find(query, {"_id": 0}).sort("scheduled_date", 1).to_list(1000)
+    return reviews
+
+@api_router.post("/reviews")
+async def create_review(
+    client_id: str,
+    client_name: str,
+    review_type: str,
+    scheduled_date: str,
+    scheduled_time: str,
+    duration_minutes: int = 60,
+    attendees: List[str] = [],
+    notes: Optional[str] = None,
+    user: dict = Depends(require_role(["cs_lead", "csm"]))
+):
+    review = ScheduledReview(
+        client_id=client_id,
+        client_name=client_name,
+        review_type=review_type,
+        scheduled_date=scheduled_date,
+        scheduled_time=scheduled_time,
+        duration_minutes=duration_minutes,
+        attendees=attendees,
+        notes=notes
+    )
+    await db.scheduled_reviews.insert_one(review.model_dump())
+    return review
+
+@api_router.patch("/reviews/{review_id}")
+async def update_review(review_id: str, status: Optional[str] = None, notes: Optional[str] = None, user: dict = Depends(require_auth)):
+    update_data = {}
+    if status:
+        update_data["status"] = status
+    if notes is not None:
+        update_data["notes"] = notes
+    
+    if update_data:
+        result = await db.scheduled_reviews.update_one({"id": review_id}, {"$set": update_data})
+        if result.modified_count == 0:
+            raise HTTPException(status_code=404, detail="Review not found")
+    
+    return {"message": "Review updated"}
+
+@api_router.delete("/reviews/{review_id}")
+async def delete_review(review_id: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    result = await db.scheduled_reviews.delete_one({"id": review_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"message": "Review deleted"}
+
+# =============================================================================
+# TEAM MEMBERS (Org Mapping)
+# =============================================================================
+
+@api_router.get("/team-members")
+async def get_team_members(user: dict = Depends(require_auth)):
+    members = await db.team_members.find({}, {"_id": 0}).to_list(1000)
+    return members
+
+@api_router.post("/team-members")
+async def create_team_member(name: str, role: str, email: str, phone: Optional[str] = None, user: dict = Depends(require_role(["cs_lead"]))):
+    member = TeamMember(name=name, role=role, email=email, phone=phone)
+    await db.team_members.insert_one(member.model_dump())
+    return member
+
+@api_router.delete("/team-members/{member_id}")
+async def delete_team_member(member_id: str, user: dict = Depends(require_role(["cs_lead"]))):
+    result = await db.team_members.delete_one({"id": member_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    return {"message": "Team member deleted"}
+
+# =============================================================================
+# LOBs (Lines of Business)
+# =============================================================================
+
+@api_router.get("/lobs")
+async def get_lobs(user: dict = Depends(require_auth)):
+    lobs = await db.lobs.find({}, {"_id": 0}).to_list(1000)
+    return lobs
+
+@api_router.post("/lobs")
+async def create_lob(name: str, description: Optional[str] = None, user: dict = Depends(require_role(["cs_lead"]))):
+    lob = LOB(name=name, description=description)
+    await db.lobs.insert_one(lob.model_dump())
+    return lob
+
+# =============================================================================
+# CLIENT LOB MAPPINGS
+# =============================================================================
+
+@api_router.get("/org-mappings")
+async def get_org_mappings(client_id: Optional[str] = None, user: dict = Depends(require_auth)):
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    mappings = await db.client_lob_mappings.find(query, {"_id": 0}).to_list(1000)
+    return mappings
+
+@api_router.post("/org-mappings")
+async def create_org_mapping(
+    client_id: str,
+    client_name: str,
+    lob_id: str,
+    lob_name: str,
+    anka_team_members: List[str] = [],
+    user: dict = Depends(require_role(["cs_lead", "csm"]))
+):
+    mapping = ClientLOBMapping(
+        client_id=client_id,
+        client_name=client_name,
+        lob_id=lob_id,
+        lob_name=lob_name,
+        anka_team_members=anka_team_members
+    )
+    await db.client_lob_mappings.insert_one(mapping.model_dump())
+    return mapping
+
+@api_router.delete("/org-mappings/{mapping_id}")
+async def delete_org_mapping(mapping_id: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    result = await db.client_lob_mappings.delete_one({"id": mapping_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return {"message": "Mapping deleted"}
+
+# =============================================================================
+# INTEGRATIONS CONFIG
+# =============================================================================
+
+@api_router.get("/integrations")
+async def get_integrations(user: dict = Depends(require_role(["cs_lead"]))):
+    integrations = await db.integrations.find({}, {"_id": 0}).to_list(100)
+    return integrations
+
+@api_router.post("/integrations")
+async def create_integration(integration_name: str, config: Dict[str, Any] = {}, user: dict = Depends(require_role(["cs_lead"]))):
+    integration = IntegrationConfig(integration_name=integration_name, config=config)
+    await db.integrations.update_one(
+        {"integration_name": integration_name},
+        {"$set": integration.model_dump()},
+        upsert=True
+    )
+    return integration
+
+@api_router.patch("/integrations/{integration_name}/status")
+async def update_integration_status(integration_name: str, status: str, user: dict = Depends(require_role(["cs_lead"]))):
+    await db.integrations.update_one(
+        {"integration_name": integration_name},
+        {"$set": {"connection_status": status, "last_sync": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"message": "Integration status updated"}
+
+# =============================================================================
+# REPORT GENERATION (DOCX)
+# =============================================================================
+
+@api_router.post("/reports/generate-docx")
+async def generate_docx_report(client_id: str, report_type: str = "external", user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Generate a Word document report for a client"""
+    from docx import Document
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    
+    # Fetch client data
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Fetch performance data
+    performance = await db.performance_records.find({"client_id": client_id}).sort("period_end", -1).limit(3).to_list(3)
+    
+    # Generate AI narrative
+    try:
+        template_slug = "client_report_external" if report_type == "external" else "weekly_summary"
+        ai_prompt = f"""Generate a professional {report_type} report narrative for {client['name']}.
+
+Performance Data:
+{json.dumps(performance, indent=2, default=str)}
+
+Client Status: {client.get('status', 'active')}
+Health Score: {client.get('health_score', 80)}
+
+Write a concise executive summary (2-3 paragraphs) suitable for a {'client-facing' if report_type == 'external' else 'internal team'} document."""
+        
+        ai_narrative = await generate_with_ai(ai_prompt)
+    except Exception as e:
+        ai_narrative = f"Performance report for {client['name']}. Please review the metrics below for detailed analysis."
+    
+    # Create document
+    doc = Document()
+    
+    # Header
+    header = doc.add_heading('Anka Healthcare', 0)
+    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    title = doc.add_heading(f"{'Client Performance Report' if report_type == 'external' else 'Internal Performance Report'}", 1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Client info
+    doc.add_paragraph(f"Client: {client['name']}")
+    doc.add_paragraph(f"Report Date: {datetime.now().strftime('%B %d, %Y')}")
+    doc.add_paragraph(f"Report Type: {report_type.title()}")
+    doc.add_paragraph("")
+    
+    # Executive Summary
+    doc.add_heading('Executive Summary', 2)
+    doc.add_paragraph(ai_narrative)
+    
+    # Performance Metrics
+    doc.add_heading('Performance Metrics', 2)
+    
+    if performance:
+        table = doc.add_table(rows=1, cols=5)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Period'
+        hdr_cells[1].text = 'Denials Worked'
+        hdr_cells[2].text = 'Recovered'
+        hdr_cells[3].text = 'Recovery Rate'
+        hdr_cells[4].text = 'SLA Compliance'
+        
+        for perf in performance:
+            row_cells = table.add_row().cells
+            row_cells[0].text = f"{perf.get('period_start', 'N/A')[:10]} - {perf.get('period_end', 'N/A')[:10]}"
+            row_cells[1].text = f"{perf.get('denials_worked', 0):,}"
+            row_cells[2].text = f"${perf.get('dollars_recovered', 0):,.2f}"
+            row_cells[3].text = f"{perf.get('recovery_rate', 0):.1f}%"
+            row_cells[4].text = f"{perf.get('sla_compliance_pct', 0):.1f}%"
+    else:
+        doc.add_paragraph("No performance data available.")
+    
+    # Internal-only sections
+    if report_type == "internal":
+        doc.add_heading('Internal Notes', 2)
+        doc.add_paragraph(f"Client Status: {client.get('status', 'active')}")
+        doc.add_paragraph(f"Health Score: {client.get('health_score', 80)}")
+        doc.add_paragraph(f"Assigned CSM: {client.get('assigned_csm', 'N/A')}")
+        
+        # Recent alerts
+        alerts = await db.alerts.find({"client_id": client_id, "status": {"$in": ["active", "acknowledged"]}}).limit(5).to_list(5)
+        if alerts:
+            doc.add_heading('Active Alerts', 3)
+            for alert in alerts:
+                doc.add_paragraph(f"• [{alert.get('severity', 'medium').upper()}] {alert.get('title', 'N/A')}")
+    
+    # Footer
+    doc.add_paragraph("")
+    footer = doc.add_paragraph("Generated by Anka CS Hub")
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Save to bytes
+    file_stream = io.BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    
+    # Log audit
+    await log_audit(user['id'], user['name'], 'report_download', 'report', client_id, {
+        'client_name': client['name'],
+        'report_type': report_type
+    })
+    
+    filename = f"anka_report_{client['name'].replace(' ', '_')}_{report_type}_{datetime.now().strftime('%Y%m%d')}.docx"
+    
+    return StreamingResponse(
+        file_stream,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@api_router.post("/reports/generate-both")
+async def generate_both_reports(client_id: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Generate both internal and external reports - returns URLs to download each"""
+    # For simplicity, we'll return instructions to call the endpoint twice
+    return {
+        "message": "Call /reports/generate-docx twice with report_type=internal and report_type=external",
+        "internal_url": f"/api/reports/generate-docx?client_id={client_id}&report_type=internal",
+        "external_url": f"/api/reports/generate-docx?client_id={client_id}&report_type=external"
+    }
 
 @api_router.get("/")
 async def root():
@@ -1698,6 +2149,216 @@ Format as JSON with subject, body, recommended_actions, and suggested_attendees.
         threshold = AlertThreshold(client_id=None)
         await db.alert_thresholds.insert_one(threshold.model_dump())
         logger.info("Created default alert thresholds")
+    
+    # Seed default LOBs if none exist
+    lobs_count = await db.lobs.count_documents({})
+    if lobs_count == 0:
+        default_lobs = [
+            LOB(name="EV", description="Eligibility Verification"),
+            LOB(name="Prior Auth", description="Prior Authorization"),
+            LOB(name="Coding", description="Medical Coding"),
+            LOB(name="Billing", description="Medical Billing"),
+            LOB(name="AR", description="Accounts Receivable"),
+            LOB(name="Payment Posting", description="Payment Posting & Reconciliation"),
+            LOB(name="Denial Management", description="Denial Appeals & Management")
+        ]
+        for lob in default_lobs:
+            await db.lobs.insert_one(lob.model_dump())
+        logger.info(f"Seeded {len(default_lobs)} LOBs")
+    
+    # Seed default team members if none exist
+    members_count = await db.team_members.count_documents({})
+    if members_count == 0:
+        default_members = [
+            TeamMember(name="Sarah Mitchell", role="manager", email="sarah.mitchell@anka.health"),
+            TeamMember(name="James Rodriguez", role="supervisor", email="james.rodriguez@anka.health"),
+            TeamMember(name="Emily Chen", role="team_lead", email="emily.chen@anka.health"),
+            TeamMember(name="Michael Thompson", role="supervisor", email="michael.thompson@anka.health")
+        ]
+        for member in default_members:
+            await db.team_members.insert_one(member.model_dump())
+        logger.info(f"Seeded {len(default_members)} team members")
+    
+    # Seed default integrations if none exist
+    integrations_count = await db.integrations.count_documents({})
+    if integrations_count == 0:
+        default_integrations = [
+            IntegrationConfig(integration_name="microsoft_365", connection_status="disconnected", config={"tenant_id": "", "client_id": ""}),
+            IntegrationConfig(integration_name="hubspot", connection_status="disconnected", config={"api_key": ""}),
+            IntegrationConfig(integration_name="google_calendar", connection_status="disconnected", config={"credentials": {}})
+        ]
+        for integration in default_integrations:
+            await db.integrations.insert_one(integration.model_dump())
+        logger.info(f"Seeded {len(default_integrations)} integrations")
+    
+    # Start background task for scheduled alert checks
+    asyncio.create_task(scheduled_alert_checks())
+    logger.info("Started scheduled alert checks background task")
+
+async def scheduled_alert_checks():
+    """Run alert checks daily"""
+    while True:
+        try:
+            logger.info("Running scheduled alert checks...")
+            
+            # Run the three alert check functions
+            # We need to simulate an admin user context
+            admin = await db.users.find_one({"role": "cs_lead"}, {"_id": 0})
+            if admin:
+                # Engagement gaps
+                contacts = await db.client_contacts.find({}, {"_id": 0}).to_list(10000)
+                now = datetime.now(timezone.utc)
+                alerts_created = 0
+                
+                default_threshold = await db.alert_thresholds.find_one({"client_id": None}, {"_id": 0})
+                if not default_threshold:
+                    default_threshold = {"engagement_gap_decision_maker_days": 14, "engagement_gap_influencer_days": 30}
+                
+                for contact in contacts:
+                    if contact.get('role_type') not in ['decision-maker', 'influencer']:
+                        continue
+                    
+                    threshold = await db.alert_thresholds.find_one({"client_id": contact.get('client_id')}, {"_id": 0})
+                    if not threshold:
+                        threshold = default_threshold
+                    
+                    days_threshold = (
+                        threshold.get('engagement_gap_decision_maker_days', 14)
+                        if contact.get('role_type') == 'decision-maker'
+                        else threshold.get('engagement_gap_influencer_days', 30)
+                    )
+                    
+                    last_dates = []
+                    for field in ['last_email_date', 'last_call_date', 'last_meeting_date']:
+                        if contact.get(field):
+                            try:
+                                last_dates.append(datetime.fromisoformat(contact[field].replace('Z', '+00:00')))
+                            except:
+                                pass
+                    
+                    if not last_dates:
+                        days_since = 999
+                    else:
+                        most_recent = max(last_dates)
+                        days_since = (now - most_recent).days
+                    
+                    if days_since > days_threshold:
+                        existing = await db.alerts.find_one({
+                            "client_id": contact.get('client_id'),
+                            "alert_type": "engagement_gap",
+                            "status": {"$in": ["active", "acknowledged"]},
+                            "trigger_data.contact_id": contact.get('id')
+                        }, {"_id": 0})
+                        
+                        if not existing:
+                            client = await db.clients.find_one({"id": contact.get('client_id')}, {"_id": 0})
+                            client_name = client.get('name', 'Unknown') if client else 'Unknown'
+                            
+                            alert = Alert(
+                                client_id=contact.get('client_id', ''),
+                                client_name=client_name,
+                                alert_type="engagement_gap",
+                                severity="high" if contact.get('role_type') == 'decision-maker' else "medium",
+                                title=f"No contact with {contact.get('name', 'Unknown')} ({contact.get('role_type', 'contact')}) in {days_since} days",
+                                description=f"Contact {contact.get('name', 'Unknown')} has not been engaged in {days_since} days.",
+                                trigger_data={
+                                    "contact_id": contact.get('id'),
+                                    "contact_name": contact.get('name'),
+                                    "role_type": contact.get('role_type'),
+                                    "days_since_contact": days_since
+                                }
+                            )
+                            await db.alerts.insert_one(alert.model_dump())
+                            alerts_created += 1
+                
+                logger.info(f"Created {alerts_created} engagement gap alerts")
+                
+                # Renewal alerts
+                clients = await db.clients.find({"status": "active"}, {"_id": 0}).to_list(10000)
+                renewal_alerts = 0
+                
+                for client in clients:
+                    if not client.get('contract_end'):
+                        continue
+                    
+                    try:
+                        contract_end = datetime.fromisoformat(client['contract_end'].replace('Z', '+00:00'))
+                        days_until = (contract_end - now).days
+                    except:
+                        continue
+                    
+                    threshold = await db.alert_thresholds.find_one({"client_id": client['id']}, {"_id": 0})
+                    if not threshold:
+                        threshold = default_threshold
+                    
+                    if 55 <= days_until <= 65 and threshold.get('renewal_alert_60_days', True):
+                        existing = await db.alerts.find_one({
+                            "client_id": client['id'],
+                            "alert_type": "renewal",
+                            "status": {"$in": ["active", "acknowledged"]},
+                            "trigger_data.days_threshold": 60
+                        }, {"_id": 0})
+                        if not existing:
+                            alert = Alert(
+                                client_id=client['id'],
+                                client_name=client['name'],
+                                alert_type="renewal",
+                                severity="medium",
+                                title=f"Contract renewal in {days_until} days",
+                                description=f"Contract expires on {client['contract_end']}",
+                                trigger_data={"days_until_renewal": days_until, "days_threshold": 60}
+                            )
+                            await db.alerts.insert_one(alert.model_dump())
+                            renewal_alerts += 1
+                    
+                    if 25 <= days_until <= 35 and threshold.get('renewal_alert_30_days', True):
+                        existing = await db.alerts.find_one({
+                            "client_id": client['id'],
+                            "alert_type": "renewal",
+                            "status": {"$in": ["active", "acknowledged"]},
+                            "trigger_data.days_threshold": 30
+                        }, {"_id": 0})
+                        if not existing:
+                            alert = Alert(
+                                client_id=client['id'],
+                                client_name=client['name'],
+                                alert_type="renewal",
+                                severity="high",
+                                title=f"Contract renewal in {days_until} days",
+                                description=f"Contract expires on {client['contract_end']}",
+                                trigger_data={"days_until_renewal": days_until, "days_threshold": 30}
+                            )
+                            await db.alerts.insert_one(alert.model_dump())
+                            renewal_alerts += 1
+                    
+                    if 10 <= days_until <= 20 and threshold.get('renewal_alert_15_days', True):
+                        existing = await db.alerts.find_one({
+                            "client_id": client['id'],
+                            "alert_type": "renewal",
+                            "status": {"$in": ["active", "acknowledged"]},
+                            "trigger_data.days_threshold": 15
+                        }, {"_id": 0})
+                        if not existing:
+                            alert = Alert(
+                                client_id=client['id'],
+                                client_name=client['name'],
+                                alert_type="renewal",
+                                severity="critical",
+                                title=f"Contract renewal in {days_until} days - URGENT",
+                                description=f"Contract expires on {client['contract_end']}",
+                                trigger_data={"days_until_renewal": days_until, "days_threshold": 15}
+                            )
+                            await db.alerts.insert_one(alert.model_dump())
+                            renewal_alerts += 1
+                
+                logger.info(f"Created {renewal_alerts} renewal alerts")
+            
+            logger.info("Scheduled alert checks completed")
+        except Exception as e:
+            logger.error(f"Error in scheduled alert checks: {e}")
+        
+        # Wait 24 hours
+        await asyncio.sleep(86400)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

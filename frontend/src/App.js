@@ -1,9 +1,9 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { 
   LayoutDashboard, Users, AlertTriangle, MessageSquare, FileText, 
   Settings, ChevronRight, LogOut, Bell, Phone, Calendar,
-  TrendingUp, UserCircle, Menu, X
+  TrendingUp, UserCircle, Menu, X, Network, Sparkles
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -17,6 +17,9 @@ import CommunicationsPage from './pages/CommunicationsPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import FollowUpsPage from './pages/FollowUpsPage';
+import CalendarPage from './pages/CalendarPage';
+import OrgMappingPage from './pages/OrgMappingPage';
+import SchedulingPage from './pages/SchedulingPage';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -108,9 +111,12 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/', testId: 'nav-dashboard', roles: ['cs_lead', 'csm', 'ops'] },
     { icon: Users, label: 'Clients', path: '/clients', testId: 'nav-clients', roles: ['cs_lead', 'csm', 'ops'] },
+    { icon: Network, label: 'Org Mapping', path: '/org-mapping', testId: 'nav-org-mapping', roles: ['cs_lead', 'csm'] },
+    { icon: Calendar, label: 'Calendar', path: '/calendar', testId: 'nav-calendar', roles: ['cs_lead', 'csm'] },
     { icon: AlertTriangle, label: 'Alerts', path: '/alerts', testId: 'nav-alerts', roles: ['cs_lead', 'csm'] },
     { icon: Phone, label: 'Follow-Ups', path: '/followups', testId: 'nav-followups', roles: ['cs_lead', 'csm'] },
     { icon: MessageSquare, label: 'Communications', path: '/communications', testId: 'nav-communications', roles: ['cs_lead', 'csm'] },
+    { icon: Sparkles, label: 'AI Scheduling', path: '/scheduling', testId: 'nav-scheduling', roles: ['cs_lead', 'csm'] },
     { icon: FileText, label: 'Reports', path: '/reports', testId: 'nav-reports', roles: ['cs_lead', 'csm', 'ops'] },
     { icon: Settings, label: 'Settings', path: '/settings', testId: 'nav-settings', roles: ['cs_lead'] },
   ];
@@ -164,7 +170,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
         </div>
         
         {/* Navigation */}
-        <nav className="flex-1 p-4 overflow-y-auto">
+        <nav className="flex-1 p-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
           <ul className="space-y-1">
             {filteredItems.map((item) => {
               const Icon = item.icon;
@@ -184,7 +190,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                     }`}
                   >
                     <Icon className="h-5 w-5" />
-                    <span>{item.label}</span>
+                    <span className="text-sm">{item.label}</span>
                     {active && <ChevronRight className="h-4 w-4 ml-auto" />}
                   </button>
                 </li>
@@ -218,18 +224,103 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   );
 };
 
+// Notification Dropdown
+const NotificationDropdown = ({ alerts, onClose }) => {
+  const navigate = useNavigate();
+  
+  const getSeverityColor = (severity) => {
+    const colors = {
+      critical: 'bg-red-500',
+      high: 'bg-red-400',
+      medium: 'bg-amber-400',
+      low: 'bg-slate-400'
+    };
+    return colors[severity] || colors.low;
+  };
+
+  const timeAgo = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000 / 60);
+    if (diff < 60) return `${diff}m ago`;
+    if (diff < 1440) return `${Math.floor(diff/60)}h ago`;
+    return `${Math.floor(diff/1440)}d ago`;
+  };
+
+  return (
+    <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-xl border border-slate-200 z-50" data-testid="notification-dropdown">
+      <div className="p-3 border-b border-slate-100">
+        <h3 className="font-semibold text-slate-900">Recent Alerts</h3>
+      </div>
+      <div className="max-h-80 overflow-y-auto">
+        {alerts.length === 0 ? (
+          <div className="p-4 text-center text-slate-500">
+            <Bell className="h-8 w-8 mx-auto mb-2 text-slate-300" />
+            <p className="text-sm">All clear! No active alerts.</p>
+          </div>
+        ) : (
+          alerts.map((alert) => (
+            <div 
+              key={alert.id}
+              className="p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-50 last:border-0"
+              onClick={() => {
+                navigate(`/clients/${alert.client_id}`);
+                onClose();
+              }}
+            >
+              <div className="flex items-start gap-3">
+                <div className={`w-2 h-2 mt-2 rounded-full ${getSeverityColor(alert.severity)} ${alert.severity === 'critical' ? 'animate-pulse' : ''}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-900 truncate">{alert.title}</p>
+                  <p className="text-xs text-slate-500">{alert.client_name}</p>
+                  <p className="text-xs text-slate-400 mt-1">{timeAgo(alert.created_at)}</p>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="p-2 border-t border-slate-100">
+        <button 
+          className="w-full text-center text-sm text-[#1B4F72] hover:underline py-2"
+          onClick={() => {
+            navigate('/alerts');
+            onClose();
+          }}
+        >
+          View All Alerts
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // Top Header
 const Header = ({ setIsOpen }) => {
   const { user } = useAuth();
   const [alerts, setAlerts] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     fetchAlerts();
+    const interval = setInterval(fetchAlerts, 60000); // Refresh every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const fetchAlerts = async () => {
     try {
-      const response = await axios.get(`${API}/alerts/today`);
+      const response = await axios.get(`${API}/alerts?status=active`);
       setAlerts(response.data.slice(0, 5));
     } catch (error) {
       console.error('Error fetching alerts:', error);
@@ -249,13 +340,23 @@ const Header = ({ setIsOpen }) => {
       
       <div className="flex items-center gap-4">
         {/* Notifications */}
-        <div className="relative">
-          <button className="p-2 hover:bg-slate-100 rounded-lg relative" data-testid="notifications-btn">
+        <div className="relative" ref={dropdownRef}>
+          <button 
+            className="p-2 hover:bg-slate-100 rounded-lg relative" 
+            data-testid="notifications-btn"
+            onClick={() => setShowNotifications(!showNotifications)}
+          >
             <Bell className="h-5 w-5 text-slate-600" />
             {alerts.length > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
             )}
           </button>
+          {showNotifications && (
+            <NotificationDropdown 
+              alerts={alerts} 
+              onClose={() => setShowNotifications(false)} 
+            />
+          )}
         </div>
         
         {/* User */}
@@ -305,6 +406,21 @@ function App() {
           <Route path="/clients/:clientId" element={
             <ProtectedRoute>
               <MainLayout><ClientDetailPage /></MainLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/org-mapping" element={
+            <ProtectedRoute allowedRoles={['cs_lead', 'csm']}>
+              <MainLayout><OrgMappingPage /></MainLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/calendar" element={
+            <ProtectedRoute allowedRoles={['cs_lead', 'csm']}>
+              <MainLayout><CalendarPage /></MainLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/scheduling" element={
+            <ProtectedRoute allowedRoles={['cs_lead', 'csm']}>
+              <MainLayout><SchedulingPage /></MainLayout>
             </ProtectedRoute>
           } />
           <Route path="/alerts" element={
