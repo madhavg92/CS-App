@@ -47,6 +47,12 @@ const ClientDetailPage = () => {
   const [newContact, setNewContact] = useState({
     name: '', title: '', email: '', phone: '', role_type: 'operations'
   });
+  
+  // Transcript states
+  const [transcripts, setTranscripts] = useState([]);
+  const [showAddTranscript, setShowAddTranscript] = useState(false);
+  const [transcriptForm, setTranscriptForm] = useState({ call_date: '', duration_minutes: '', attendees: '', transcript_text: '' });
+  const [analyzingTranscript, setAnalyzingTranscript] = useState(null);
 
   useEffect(() => {
     fetchClientData();
@@ -54,14 +60,15 @@ const ClientDetailPage = () => {
 
   const fetchClientData = async () => {
     try {
-      const [clientRes, contactsRes, perfRes, alertsRes, commsRes, followupsRes, usersRes] = await Promise.all([
+      const [clientRes, contactsRes, perfRes, alertsRes, commsRes, followupsRes, usersRes, transcriptsRes] = await Promise.all([
         axios.get(`${API}/clients/${clientId}`),
         axios.get(`${API}/contacts?client_id=${clientId}`),
         axios.get(`${API}/performance?client_id=${clientId}`),
         axios.get(`${API}/alerts?client_id=${clientId}`),
         axios.get(`${API}/communications?client_id=${clientId}`),
         axios.get(`${API}/followups?client_id=${clientId}`),
-        axios.get(`${API}/users`)
+        axios.get(`${API}/users`),
+        axios.get(`${API}/transcripts?client_id=${clientId}`)
       ]);
       
       setClient(clientRes.data);
@@ -71,10 +78,32 @@ const ClientDetailPage = () => {
       setCommunications(commsRes.data);
       setFollowups(followupsRes.data);
       setUsers(usersRes.data);
+      setTranscripts(transcriptsRes.data);
     } catch (error) {
       console.error('Error fetching client data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTranscripts = async () => {
+    try {
+      const response = await axios.get(`${API}/transcripts?client_id=${clientId}`);
+      setTranscripts(response.data);
+    } catch (error) {
+      console.error('Error fetching transcripts:', error);
+    }
+  };
+
+  const handleAnalyzeTranscript = async (transcriptId) => {
+    setAnalyzingTranscript(transcriptId);
+    try {
+      await axios.post(`${API}/transcripts/${transcriptId}/analyze`);
+      fetchTranscripts();
+    } catch (error) {
+      console.error('Error analyzing transcript:', error);
+    } finally {
+      setAnalyzingTranscript(null);
     }
   };
 
@@ -622,6 +651,85 @@ const ClientDetailPage = () => {
               )}
             </CardContent>
           </Card>
+
+          {/* Call Transcripts */}
+          <Card className="bg-white border border-slate-200 shadow-sm mt-4">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Call Notes & Transcripts</CardTitle>
+                <Button size="sm" onClick={() => setShowAddTranscript(true)} className="bg-[#1B4F72] hover:bg-[#154360]">
+                  Upload Call Notes
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {transcripts.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">
+                  <Phone className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                  <p>No call transcripts yet</p>
+                  <p className="text-sm text-slate-400 mt-1">Upload call notes to track conversations and detect new stakeholders</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {transcripts.map(t => (
+                    <div key={t.id} className="p-4 border border-slate-200 rounded-lg">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-slate-900">{new Date(t.call_date).toLocaleDateString()}</span>
+                            {t.duration_minutes && <Badge variant="outline">{t.duration_minutes} min</Badge>}
+                            {t.sentiment && (
+                              <Badge variant={t.sentiment === 'frustrated' ? 'destructive' : t.sentiment === 'positive' ? 'default' : 'secondary'}>
+                                {t.sentiment}
+                              </Badge>
+                            )}
+                            {t.new_attendees && t.new_attendees.length > 0 && (
+                              <Badge className="bg-blue-100 text-blue-700">
+                                {t.new_attendees.length} new stakeholder{t.new_attendees.length > 1 ? 's' : ''}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-500">Attendees: {t.attendees?.join(', ') || 'Not recorded'}</p>
+                          {t.summary && <p className="text-sm text-slate-700 mt-2">{t.summary}</p>}
+                          {t.action_items && t.action_items.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-xs font-semibold text-slate-500 uppercase">Action Items:</p>
+                              <ul className="text-sm text-slate-600 mt-1 space-y-1">
+                                {t.action_items.map((item, idx) => (
+                                  <li key={idx} className="flex items-start gap-1">
+                                    <span className="text-[#1B4F72] mt-0.5">-</span> {item}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {t.new_attendees && t.new_attendees.length > 0 && (
+                            <div className="mt-2 bg-blue-50 rounded p-2">
+                              <p className="text-xs font-semibold text-blue-700">New Stakeholders Detected:</p>
+                              <p className="text-sm text-blue-600">{t.new_attendees.join(', ')}</p>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2 ml-4">
+                          {!t.summary && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleAnalyzeTranscript(t.id)}
+                              disabled={analyzingTranscript === t.id}
+                              data-testid={`analyze-transcript-${t.id}`}
+                            >
+                              {analyzingTranscript === t.id ? 'Analyzing...' : 'Analyze'}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Performance Tab */}
@@ -948,6 +1056,88 @@ const ClientDetailPage = () => {
               disabled={!newContact.name || !newContact.title || !newContact.email}
             >
               Add Contact
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Call Transcript Dialog */}
+      <Dialog open={showAddTranscript} onOpenChange={setShowAddTranscript}>
+        <DialogContent className="bg-white max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Upload Call Notes</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Call Date</Label>
+              <Input
+                type="date"
+                value={transcriptForm.call_date}
+                onChange={(e) => setTranscriptForm(prev => ({...prev, call_date: e.target.value}))}
+                data-testid="transcript-call-date"
+              />
+            </div>
+            <div>
+              <Label>Duration (minutes)</Label>
+              <Input
+                type="number"
+                placeholder="30"
+                value={transcriptForm.duration_minutes}
+                onChange={(e) => setTranscriptForm(prev => ({...prev, duration_minutes: e.target.value}))}
+                data-testid="transcript-duration"
+              />
+            </div>
+            <div>
+              <Label>Attendees (comma-separated names)</Label>
+              <Input
+                placeholder="John Smith, Jane Doe, Dr. Patel"
+                value={transcriptForm.attendees}
+                onChange={(e) => setTranscriptForm(prev => ({...prev, attendees: e.target.value}))}
+                data-testid="transcript-attendees"
+              />
+            </div>
+            <div>
+              <Label>Call Notes / Transcript</Label>
+              <textarea
+                className="w-full border rounded-lg p-3 text-sm min-h-[150px] focus:outline-none focus:ring-2 focus:ring-[#1B4F72]"
+                placeholder="Paste call notes, meeting summary, or transcript text here..."
+                value={transcriptForm.transcript_text}
+                onChange={(e) => setTranscriptForm(prev => ({...prev, transcript_text: e.target.value}))}
+                data-testid="transcript-text"
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setShowAddTranscript(false)}>Cancel</Button>
+            <Button
+              className="bg-[#1B4F72] hover:bg-[#154360]"
+              data-testid="save-transcript-btn"
+              onClick={async () => {
+                try {
+                  const payload = {
+                    client_id: clientId,
+                    call_date: transcriptForm.call_date || new Date().toISOString(),
+                    duration_minutes: transcriptForm.duration_minutes ? parseInt(transcriptForm.duration_minutes) : null,
+                    attendees: transcriptForm.attendees.split(',').map(s => s.trim()).filter(Boolean),
+                    transcript_text: transcriptForm.transcript_text,
+                    source: 'manual'
+                  };
+                  const response = await axios.post(`${API}/transcripts`, payload);
+                  
+                  // Auto-analyze if there's text
+                  if (transcriptForm.transcript_text.length > 50) {
+                    await axios.post(`${API}/transcripts/${response.data.id}/analyze`);
+                  }
+                  
+                  setShowAddTranscript(false);
+                  setTranscriptForm({ call_date: '', duration_minutes: '', attendees: '', transcript_text: '' });
+                  fetchTranscripts();
+                } catch (error) {
+                  console.error('Error creating transcript:', error);
+                }
+              }}
+            >
+              Save & Analyze
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -429,6 +429,25 @@ class EmailCadence(BaseModel):
     created_by: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+
+class CallTranscript(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_id: str
+    client_name: str
+    call_date: str  # ISO date string
+    duration_minutes: Optional[int] = None
+    attendees: List[str] = []  # Names of people on the call
+    transcript_text: Optional[str] = None
+    summary: Optional[str] = None
+    action_items: List[str] = []
+    sentiment: Optional[str] = None  # positive, neutral, negative, frustrated
+    new_attendees: List[str] = []  # Attendees not in client_contacts
+    source: str = "manual"  # manual, uploaded, transcription_service
+    created_by: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -563,6 +582,68 @@ async def get_graph_token():
     else:
         logger.error(f"Graph API token error: {result.get('error_description', 'Unknown error')}")
         return None
+
+
+async def analyze_email_sentiment(email_text: str, sender_name: str = "") -> dict:
+    """Analyze email sentiment using AI to detect client frustration"""
+    prompt = f"""Analyze the sentiment of this email from {sender_name or 'a client'}.
+
+Email content:
+{email_text[:1000]}
+
+Respond with ONLY valid JSON (no markdown, no backticks):
+{{
+    "sentiment": "positive|neutral|concerned|frustrated",
+    "confidence": 0.0-1.0,
+    "indicators": ["list of specific phrases or patterns that indicate sentiment"],
+    "escalation_recommended": true/false
+}}"""
+
+    scrubbed, _ = scrub_phi(prompt, "sentiment_analysis")
+    try:
+        response = await generate_with_ai(scrubbed, "You are a customer sentiment analyst. Analyze email tone precisely. Focus on frustration indicators: complaints, ultimatums, deadline pressure, dissatisfaction with service, threats to leave.")
+        # Parse JSON from response
+        import re
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+        return {"sentiment": "neutral", "confidence": 0.5, "indicators": [], "escalation_recommended": False}
+    except Exception as e:
+        logger.error(f"Sentiment analysis error: {e}")
+        return {"sentiment": "neutral", "confidence": 0.0, "indicators": [], "escalation_recommended": False}
+
+
+async def analyze_scope_creep(email_text: str, contracted_services: list, client_name: str = "") -> dict:
+    """Analyze email for scope creep - requests outside contracted services"""
+    prompt = f"""Analyze this email from/about {client_name or 'a client'} for scope creep.
+
+Contracted services: {', '.join(contracted_services)}
+
+Email content:
+{email_text[:1000]}
+
+Determine if the email requests services or work outside the contracted scope listed above.
+
+Respond with ONLY valid JSON (no markdown, no backticks):
+{{
+    "scope_creep_detected": true/false,
+    "confidence": 0.0-1.0,
+    "out_of_scope_requests": ["list of specific requests that are outside contracted services"],
+    "recommendation": "brief recommendation on how to handle"
+}}"""
+
+    scrubbed, _ = scrub_phi(prompt, "scope_analysis")
+    try:
+        response = await generate_with_ai(scrubbed, "You are a healthcare RCM scope analyst at Anka Healthcare. Identify requests that fall outside contracted service agreements. Common services include: EV (Eligibility Verification), Prior Auth, Coding, Billing, AR (Accounts Receivable), Payment Posting, Denial Management.")
+        import re
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+        return {"scope_creep_detected": False, "confidence": 0.5, "out_of_scope_requests": [], "recommendation": ""}
+    except Exception as e:
+        logger.error(f"Scope creep analysis error: {e}")
+        return {"scope_creep_detected": False, "confidence": 0.0, "out_of_scope_requests": [], "recommendation": ""}
+
 
 # Health Score Calculator
 async def calculate_health_score(client_id: str) -> int:
@@ -2356,6 +2437,146 @@ async def create_calendar_event(data: Dict[str, Any], user: dict = Depends(requi
         raise HTTPException(status_code=502, detail=f"Failed to create event: {str(e)[:200]}")
 
 # =============================================================================
+# CALL TRANSCRIPTS
+# =============================================================================
+
+@api_router.get("/transcripts")
+async def get_transcripts(client_id: Optional[str] = None, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Get call transcripts, optionally filtered by client"""
+    query = {}
+    if client_id:
+        query["client_id"] = client_id
+    transcripts = await db.call_transcripts.find(query, {"_id": 0}).sort("call_date", -1).to_list(1000)
+    return transcripts
+
+
+@api_router.post("/transcripts")
+async def create_transcript(data: Dict[str, Any], user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Create a new call transcript (manual entry or upload)"""
+    client = await db.clients.find_one({"id": data.get("client_id")}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    transcript = CallTranscript(
+        client_id=data["client_id"],
+        client_name=client.get("name", ""),
+        call_date=data.get("call_date", datetime.now(timezone.utc).isoformat()),
+        duration_minutes=data.get("duration_minutes"),
+        attendees=data.get("attendees", []),
+        transcript_text=data.get("transcript_text", ""),
+        source=data.get("source", "manual"),
+        created_by=user['name']
+    )
+    
+    await db.call_transcripts.insert_one(transcript.model_dump())
+    await log_audit(user['id'], user['name'], 'transcript_create', 'call_transcript', transcript.id, {'client_id': data["client_id"]})
+    
+    return {"id": transcript.id, "message": "Transcript created"}
+
+
+@api_router.post("/transcripts/{transcript_id}/analyze")
+async def analyze_transcript(transcript_id: str, user: dict = Depends(require_role(["cs_lead", "csm"]))):
+    """Analyze a call transcript using AI: generate summary, action items, sentiment, detect new stakeholders"""
+    transcript = await db.call_transcripts.find_one({"id": transcript_id}, {"_id": 0})
+    if not transcript:
+        raise HTTPException(status_code=404, detail="Transcript not found")
+    
+    client_id = transcript.get("client_id")
+    
+    # Get existing client contacts for stakeholder comparison
+    existing_contacts = await db.client_contacts.find({"client_id": client_id}, {"_id": 0}).to_list(100)
+    existing_names = set(c.get("name", "").lower().strip() for c in existing_contacts if c.get("name"))
+    
+    # Detect new attendees not in contacts
+    attendees = transcript.get("attendees", [])
+    new_attendees = [name for name in attendees if name.lower().strip() not in existing_names and name.strip()]
+    
+    # AI analysis
+    text = transcript.get("transcript_text", "")
+    if not text:
+        text = f"Call with {', '.join(attendees)} on {transcript.get('call_date', 'unknown date')}. Duration: {transcript.get('duration_minutes', 'unknown')} minutes."
+    
+    prompt = f"""Analyze this call transcript/notes for Anka Healthcare CS team.
+
+Client: {transcript.get('client_name', '')}
+Attendees: {', '.join(attendees)}
+Call Date: {transcript.get('call_date', '')}
+Duration: {transcript.get('duration_minutes', 'unknown')} minutes
+
+Call Notes/Transcript:
+{text[:2000]}
+
+Respond with ONLY valid JSON (no markdown, no backticks):
+{{
+    "summary": "2-3 sentence summary of the call",
+    "action_items": ["list of specific action items with owners if mentioned"],
+    "sentiment": "positive|neutral|concerned|frustrated",
+    "key_decisions": ["any decisions made during the call"],
+    "risks_identified": ["any risks or concerns raised"]
+}}"""
+
+    scrubbed, _ = scrub_phi(prompt, f"transcript_{transcript_id}")
+    try:
+        response = await generate_with_ai(scrubbed, "You are a customer success analyst at Anka Healthcare (RCM company). Analyze call transcripts to extract actionable insights.")
+        import re
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        if json_match:
+            analysis = json.loads(json_match.group())
+        else:
+            analysis = {"summary": response[:500], "action_items": [], "sentiment": "neutral", "key_decisions": [], "risks_identified": []}
+    except Exception as e:
+        logger.error(f"Transcript analysis error: {e}")
+        analysis = {"summary": "Analysis failed", "action_items": [], "sentiment": "neutral", "key_decisions": [], "risks_identified": []}
+    
+    # Update transcript with analysis results
+    update_data = {
+        "summary": analysis.get("summary", ""),
+        "action_items": analysis.get("action_items", []),
+        "sentiment": analysis.get("sentiment", "neutral"),
+        "new_attendees": new_attendees,
+    }
+    
+    await db.call_transcripts.update_one({"id": transcript_id}, {"$set": update_data})
+    
+    # Create new_stakeholder alerts for unrecognized attendees
+    if new_attendees:
+        for new_person in new_attendees:
+            existing_alert = await db.alerts.find_one({
+                "client_id": client_id,
+                "alert_type": "new_stakeholder",
+                "trigger_data.attendee_name": new_person,
+                "status": {"$in": ["active", "acknowledged"]}
+            }, {"_id": 0})
+            
+            if not existing_alert:
+                alert = Alert(
+                    client_id=client_id,
+                    client_name=transcript.get("client_name", ""),
+                    alert_type="new_stakeholder",
+                    severity="low",
+                    title=f"New stakeholder detected: {new_person} at {transcript.get('client_name', '')}",
+                    description=f"Unrecognized attendee '{new_person}' appeared in call on {transcript.get('call_date', '')}. Consider adding them to the org chart.",
+                    trigger_data={
+                        "attendee_name": new_person,
+                        "transcript_id": transcript_id,
+                        "call_date": transcript.get("call_date", ""),
+                        "all_attendees": attendees
+                    }
+                )
+                await db.alerts.insert_one(alert.model_dump())
+    
+    await log_audit(user['id'], user['name'], 'ai_generation', 'transcript_analysis', transcript_id, {'client_id': client_id, 'new_attendees': new_attendees})
+    
+    return {
+        "summary": analysis.get("summary", ""),
+        "action_items": analysis.get("action_items", []),
+        "sentiment": analysis.get("sentiment", "neutral"),
+        "key_decisions": analysis.get("key_decisions", []),
+        "risks_identified": analysis.get("risks_identified", []),
+        "new_attendees": new_attendees
+    }
+
+# =============================================================================
 # REPORT GENERATION (DOCX)
 # =============================================================================
 
@@ -3073,6 +3294,127 @@ async def scheduled_alert_checks():
                 
                 logger.info(f"Triggered {cadences_triggered} email cadences")
             
+                # NLP Email Analysis (requires M365 connected)
+                m365_integration = await db.integrations.find_one({"integration_name": "microsoft_365"}, {"_id": 0})
+                if m365_integration and m365_integration.get('connection_status') == 'connected':
+                    try:
+                        token = await get_graph_token()
+                        if token:
+                            # Get emails from last 7 days
+                            seven_days_ago_str = (now - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00Z")
+                            
+                            shared_mailbox = m365_integration.get('config', {}).get('shared_mailbox')
+                            base_url = f"https://graph.microsoft.com/v1.0/users/{shared_mailbox}/messages" if shared_mailbox else "https://graph.microsoft.com/v1.0/me/messages"
+                            
+                            async with httpx.AsyncClient() as client_http:
+                                response = await client_http.get(
+                                    base_url,
+                                    headers={"Authorization": f"Bearer {token}"},
+                                    params={
+                                        "$top": 50,
+                                        "$filter": f"receivedDateTime ge {seven_days_ago_str}",
+                                        "$orderby": "receivedDateTime desc",
+                                        "$select": "from,bodyPreview,receivedDateTime,subject"
+                                    }
+                                )
+                            
+                            if response.status_code == 200:
+                                emails = response.json().get("value", [])
+                                frustration_alerts = 0
+                                scope_alerts = 0
+                                
+                                # Build email-to-client mapping
+                                all_contacts = await db.client_contacts.find({}, {"_id": 0}).to_list(5000)
+                                email_to_client = {}
+                                for contact in all_contacts:
+                                    if contact.get('email'):
+                                        email_to_client[contact['email'].lower()] = {
+                                            'client_id': contact.get('client_id'),
+                                            'client_name': contact.get('client_name', ''),
+                                            'contact_name': contact.get('name', '')
+                                        }
+                                
+                                for email_msg in emails:
+                                    sender_email = email_msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+                                    sender_name = email_msg.get("from", {}).get("emailAddress", {}).get("name", "")
+                                    preview = email_msg.get("bodyPreview", "")
+                                    
+                                    if not sender_email or not preview:
+                                        continue
+                                    
+                                    # Match sender to client
+                                    client_info = email_to_client.get(sender_email)
+                                    if not client_info:
+                                        continue
+                                    
+                                    client_id = client_info['client_id']
+                                    client_name = client_info['client_name']
+                                    
+                                    # Frustration detection
+                                    sentiment_result = await analyze_email_sentiment(preview, sender_name)
+                                    if sentiment_result.get('sentiment') == 'frustrated' and sentiment_result.get('confidence', 0) > 0.7:
+                                        existing = await db.alerts.find_one({
+                                            "client_id": client_id,
+                                            "alert_type": "frustration",
+                                            "status": {"$in": ["active", "acknowledged"]},
+                                            "created_at": {"$gte": (now - timedelta(days=3)).isoformat()}
+                                        }, {"_id": 0})
+                                        if not existing:
+                                            alert = Alert(
+                                                client_id=client_id,
+                                                client_name=client_name,
+                                                alert_type="frustration",
+                                                severity="high",
+                                                title=f"Client frustration detected: {client_name}",
+                                                description=f"Frustrated tone detected in email from {sender_name}. Indicators: {', '.join(sentiment_result.get('indicators', [])[:3])}",
+                                                trigger_data={
+                                                    "sender": sender_name,
+                                                    "sender_email": sender_email,
+                                                    "sentiment": sentiment_result,
+                                                    "email_date": email_msg.get("receivedDateTime"),
+                                                    "subject": email_msg.get("subject", "")
+                                                }
+                                            )
+                                            await db.alerts.insert_one(alert.model_dump())
+                                            frustration_alerts += 1
+                                    
+                                    # Scope creep detection
+                                    client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0})
+                                    if client_doc and client_doc.get('contracted_services'):
+                                        scope_result = await analyze_scope_creep(preview, client_doc['contracted_services'], client_name)
+                                        if scope_result.get('scope_creep_detected') and scope_result.get('confidence', 0) > 0.7:
+                                            existing = await db.alerts.find_one({
+                                                "client_id": client_id,
+                                                "alert_type": "scope_creep",
+                                                "status": {"$in": ["active", "acknowledged"]},
+                                                "created_at": {"$gte": (now - timedelta(days=7)).isoformat()}
+                                            }, {"_id": 0})
+                                            if not existing:
+                                                alert = Alert(
+                                                    client_id=client_id,
+                                                    client_name=client_name,
+                                                    alert_type="scope_creep",
+                                                    severity="medium",
+                                                    title=f"Scope creep detected: {client_name}",
+                                                    description=f"Out-of-scope requests: {', '.join(scope_result.get('out_of_scope_requests', [])[:3])}. {scope_result.get('recommendation', '')}",
+                                                    trigger_data={
+                                                        "sender": sender_name,
+                                                        "scope_analysis": scope_result,
+                                                        "email_date": email_msg.get("receivedDateTime"),
+                                                        "subject": email_msg.get("subject", "")
+                                                    }
+                                                )
+                                                await db.alerts.insert_one(alert.model_dump())
+                                                scope_alerts += 1
+                                
+                                logger.info(f"NLP analysis: {frustration_alerts} frustration alerts, {scope_alerts} scope creep alerts")
+                            else:
+                                logger.warning(f"NLP email fetch returned {response.status_code}")
+                    except Exception as nlp_err:
+                        logger.error(f"NLP email analysis error: {nlp_err}")
+                else:
+                    logger.info("Skipping NLP email analysis - M365 not connected")
+
             logger.info("Scheduled alert checks completed")
         except Exception as e:
             logger.error(f"Error in scheduled alert checks: {e}")
