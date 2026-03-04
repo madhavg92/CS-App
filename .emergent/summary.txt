@@ -1,162 +1,55 @@
 <analysis>**original_problem_statement:**
-The user wants to build a production-grade Customer Success (CS) Hub for Anka Healthcare. The application started as a simple prototype and has now moved into a comprehensive production rebuild based on two detailed prompts from the user.
+The user wants to build and deploy a production-grade Customer Success (CS) Hub for Anka Healthcare. The project involves a complete rebuild of an initial prototype, followed by phased implementation of advanced features. The user provides highly detailed, multi-section prompts that act as implementation blueprints.
 
-**PRODUCT REQUIREMENTS (Phase 1 & 2):**
+**PRODUCT REQUIREMENTS (Completed Sections 2, 3, 4, 5):**
 
-1.  **Backend & Data Model:**
-    *   Replace all mock data with a production-ready data model including: , , , , , , and .
-    *   Implement JWT-based authentication with  for password hashing.
-    *   Create an endpoint to upload Ops data from CSV and Excel files.
-    *   Build a real-time alerting engine with triggers for engagement gaps, performance decline, and upcoming renewals. Alerts must be dismissible, snoozable, and resolvable.
-    *   Add a background task to run alert checks automatically every 24 hours.
-    *   Implement role-based access control (, , ).
-    *   Add a PHI scrubbing middleware for all data sent to the AI layer.
-    *   Implement an audit trail for key actions (AI generation, report downloads, alert actions).
-    *   Create a  report generation endpoint using .
-
-2.  **Frontend & UI/UX:**
-    *   Restructure the entire application with a new navigation schema: Dashboard, Clients, Client Detail (with tabs), Alerts, Communications, Reports, and Settings.
-    *   Implement a new Anka Blue color scheme (#1B4F72).
-    *   The Dashboard must show key metrics, today's alerts, and a priority call list.
-    *   The Clients list should be a Relationship Health dashboard with searchable/filterable client cards showing health scores and key stats.
-    *   The Client Detail page must use  to visualize performance trends (Line, Bar, Pie charts) and display a visual org chart.
-    *   The Alerts page must be a filterable feed of all alerts.
-    *   The Reports page should allow users to generate internal and external reports, preview analytics, and download them as  files.
-    *   The Settings page needs to manage user roles and alert thresholds.
-    *   Implement UI polish items: a notification dropdown for recent alerts, an improved dashboard welcome section, and meaningful empty states.
-
-3.  **AI & Intelligence:**
-    *   Implement a prompt template system for generating weekly summaries, performance narratives, follow-up emails, and escalations, using real data from the database.
-
-4.  **Seed Data:**
-    *   Update the seed data script to use realistic Anka team member names, client types, and RCM industry metrics.
+*   **Frontend Wiring (Section 2):** Connect existing backend endpoints to the frontend for features like  report export,  analytics on the reports page, an audit log viewer, a Health Grid view for clients, and improved empty states.
+*   **New Features (Section 3):** Implement new backend logic and corresponding frontend components for an Innovation Update Due alert, a healthcare policy tracking system with alert generation, a weekly AI-powered summary component, auto-creation of QBR follow-ups, and adding team productivity fields to data uploads.
+*   **Microsoft 365 Integration (Section 4):** Integrate with Microsoft Graph API for both Outlook and Calendar. This includes backend endpoints for configuration, testing the connection, fetching email threads, drafting AI-powered replies, sending emails, and fetching/creating calendar events. The frontend work includes building UI for M365 configuration, an Outlook inbox view, and displaying Outlook events on the calendar.
+*   **NLP-Powered Alerts & Transcripts (Section 5):** Implement NLP-based analysis of emails to automatically generate alerts for client frustration and scope creep. Add a system for managing call transcripts, including CRUD operations and an AI-powered analysis feature to generate summaries, action items, and detect new stakeholders.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The agent has completed a massive production rebuild of the application based on the user's Phase 1 requirements. This involved a complete overhaul of the backend and frontend.
+The application is a stable, feature-rich, full-stack web app. The agent has successfully completed a massive production rebuild and implemented all user requirements from Sections 2, 3, 4, and 5.
 
--   **Backend ():** New data models (Client, User, Alert, etc.), JWT authentication endpoints, and numerous API endpoints for all features have been created. The password hashing was changed from SHA-256 to , and scheduled alert checks were added. Support for Excel uploads and  export has been partially stubbed.
--   **Frontend:** The entire UI has been rebuilt with a new Anka Blue color scheme and a new navigation structure (). New pages have been created for Login, Dashboard, Clients, Client Detail, Alerts, Follow-ups, Communications, Reports, and Settings. The agent has started adding  visualizations to the Dashboard and Client Detail pages.
--   **Data:** A  script was created and run to populate the database with realistic sample data using the new production models and  hashing.
-
-However, these changes were extensive and made without any testing, so the application is currently in a broken, unstable state.
+*   **Backend ():** A large (over 3000 lines) but functional monolithic FastAPI application. It includes all data models, JWT authentication, a background scheduler for alerts and NLP tasks, and a comprehensive set of API endpoints for all application features, including M365 integration and NLP analysis.
+*   **Frontend:** The UI is fully built out using React, Tailwind CSS, and Shadcn UI, following the Anka Blue theme. All pages are functional and wired to the backend. Advanced features like  visualizations, a grid-based client health dashboard, an Outlook inbox interface, and a call transcript management UI are all implemented and working.
+*   **Data:** A  script populates the database with realistic data, including users with secure (-hashed) passwords.
+*   **Integrations:** The app is integrated with OpenAI (via Emergent LLM Key) for AI features and Microsoft 365 (via  and Graph API) for email and calendar functionality.
 
 **Last working item**:
--   **Last item agent was working:** The agent was in the middle of a large-scale, multi-file update to implement the user's Phase 2 requirements. The last specific action was editing  to add chart visualizations () and integrate a visual org chart component. This followed edits to , , , , and many other files.
--   **Status:** IN PROGRESS
--   **Agent Testing Done:** N
--   **Which testing method agent to use?** **testing_agent_v3_fork**. The scope of changes is massive (new dependencies, auth logic change, new endpoints, complete UI overhaul). A full integration test is mandatory to identify all breaking changes across the stack.
+-   **Last item agent was working:** The agent finished implementing all tasks from Section 5: NLP-Powered Alerts + Call Transcripts. This involved adding a  model, creating NLP helper functions for email sentiment/scope-creep analysis, integrating these into the daily scheduler, building CRUD endpoints for call transcripts, and creating the corresponding UI on the .
+-   **Status:** COMPLETED
+-   **Agent Testing Done:** Y
+-   **Which testing method agent to use?** N/A
 -   **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
--   **Issue 1:** The entire application is likely broken due to massive, untested changes across the entire stack. (Priority: P0)
-
-**Issues Detail:**
--   **Issue 1:**
-    -   **Description:** The agent performed a complete application rebuild, touching nearly every critical file (, , , and all page components). New dependencies (, , , ) were introduced but not installed. The authentication mechanism was changed. None of these changes were tested. The backend will not start, and the frontend will not compile.
-    -   **Attempted fixes:** None. The agent was in the middle of implementation when the session ended.
-    -   **Next debug checklist:**
-        1.  Install all new backend dependencies: Looking in indexes: https://pypi.org/simple, https://d33sy5i8bnduwe.cloudfront.net/simple/
-Requirement already satisfied: bcrypt in /root/.venv/lib/python3.11/site-packages (4.1.3)
-Requirement already satisfied: openpyxl in /root/.venv/lib/python3.11/site-packages (3.1.5)
-Requirement already satisfied: python-docx in /root/.venv/lib/python3.11/site-packages (1.2.0)
-Requirement already satisfied: et-xmlfile in /root/.venv/lib/python3.11/site-packages (from openpyxl) (2.0.0)
-Requirement already satisfied: lxml>=3.1.0 in /root/.venv/lib/python3.11/site-packages (from python-docx) (6.0.2)
-Requirement already satisfied: typing_extensions>=4.9.0 in /root/.venv/lib/python3.11/site-packages (from python-docx) (4.15.0). Update .
-        2.  Verify frontend dependencies: Ensure  is in . Run yarn install v1.22.22
-[1/4] Resolving packages...
-[2/4] Fetching packages...
-[3/4] Linking dependencies...
-[4/4] Building fresh packages...
-success Saved lockfile.
-Done in 0.09s. if needed.
-        3.  Restart the backend service: backend: stopped
-backend: started. Check logs (==> /var/log/supervisor/backend.err.log <==
-INFO:     Stopping reloader process [48]
-INFO:     Will watch for changes in these directories: ['/app/backend']
-INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-INFO:     Started reloader process [257] using WatchFiles
-
-==> /var/log/supervisor/backend.out.log <==) for import errors or startup failures.
-        4.  Run the updated seed script to ensure the database is correctly populated with -hashed passwords: Starting data seed...
-Cleared existing data
-Created 6 users
-Created 10 clients
-Created 59 contacts
-Created 80 performance records
-Created 19 alerts
-Created 24 follow-ups
-Created 68 communications
-Created 6 scheduled reviews
-Created 7 LOBs
-Created 5 team members
-Created default alert thresholds
-Created 3 integrations
-
-==================================================
-Data seed completed successfully!
-==================================================
-
-Login credentials:
-  Admin: admin@anka.health / admin123
-  CS Lead: gayatri.garg@anka.health / password123
-  CS Lead: gurpreet.sahni@anka.health / password123
-  CSM: priya.sharma@anka.health / password123
-  CSM: rahul.verma@anka.health / password123
-  Ops: ankit.patel@anka.health / password123.
-        5.  Restart the frontend service: frontend: stopped
-frontend: started. Check for compilation errors.
-        6.  Once the app is running, perform a full regression test, starting with login (using credentials from the new ).
-    -   **Why fix this issue and what will be achieved with the fix?** This is a critical blocker. The application must be stabilized before any further development can continue.
-    -   **Status:** NOT STARTED
-    -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** Both
-    -   **Blocked on other issue:** None
+There are no known pending issues. The application was stabilized at the start of the session, and all subsequent feature development was followed by comprehensive testing.
 
 **In progress Task List**:
--   **Task 1:** Complete and Stabilize Phase 2 Implementation (Priority: P0)
-    -   **Where to resume:** After stabilizing the application (see Issue 1), the agent must review all the partial changes made for Phase 2 and complete them.
-        *   : Verify routing for all pages and ensure the notification dropdown logic is fully implemented.
-        *   : Finish integrating the  and ensure the  visualizations are fetching and displaying data correctly.
-        *   : Ensure the  visualizations are working.
-        *   : Complete the  export logic and the audit log implementation.
-    -   **What will be achieved with this?** A stable, working application that successfully incorporates all the bug fixes and initial enhancements from the user's Phase 2 request.
-    -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** Both
-    -   **Blocked on something:** Blocked by Issue 1: Application is likely broken.
+There are no tasks currently in progress. The agent has completed all user-provided instructions.
 
 **Upcoming and Future Tasks**
-**Upcoming Tasks (Remaining from Phase 2):**
-*   **Task 1 (P1): Implement  Charts:** Add the Analytics Preview section to  with  visualizations.
-*   **Task 2 (P1): Implement  Report Export:** Wire up the Download .docx button on the  to the backend endpoint and ensure files are generated and downloaded correctly for both internal and external report types.
-*   **Task 3 (P1): Implement Relationship Health Dashboard:** Refactor  to be a grid/heatmap view with enhanced sorting and filtering.
-*   **Task 4 (P1): Implement Audit Trail:** Fully integrate the audit logging across all specified actions (report generation, alert actions, etc.) and build the Audit Log UI in the .
-*   **Task 5 (P2): UI Polish:**
-    *   : Implement the notification dropdown functionality with links to alerts.
-    *   : Add the quick summary and action buttons to the .
-    *   : Add meaningful empty state messages and action buttons across the application.
-
-**Future Tasks:**
+**Future Tasks (from original handoff):**
 *   **Task 1 (P2): Full CRM Integration:** Replace the mock CRM sync stubs with a real integration (e.g., HubSpot).
-*   **Task 2 (P2): M365 Integration:** Build out the calendar sync and email integration features.
-*   **Task 3 (P2): Microsoft SSO:** Replace the JWT email/password system with Azure AD for single sign-on.
+*   **Task 2 (P2): Microsoft SSO:** Replace the JWT email/password system with Azure AD for single sign-on.
+
+**Note for next agent:** The user provides very detailed, prescriptive prompts for each phase of work. Await the next prompt (likely for Section 6 or other future tasks) before proceeding.
 
 **Completed work in this session**
--   **UI Color Fix:** Resolved the initial pink/purple color bug by correcting the HSL/RGB value mismatch in  and . Verified consistency across all pages.
--   **Phase 1 Production Rebuild:**
-    -   Created a new, robust backend in  with production-ready data models and JWT authentication.
-    -   Rebuilt the entire frontend with a new Anka Blue theme, a logical navigation structure in , and created numerous functional pages (, , , etc.).
-    -   Created and executed a  script to populate the database.
--   **Initiated Phase 2 Work (In Progress):**
-    -   Backend: Updated  to use , support  uploads, include scheduled alert checks via , and add stubs for audit logging and  generation.
-    -   Frontend: Began wiring up orphaned pages in  and started integrating  into the  and .
+-   **Application Stabilization:** Successfully repaired the broken application by installing all missing dependencies (, , , ), restarting services, and reseeding the database.
+-   **Phase 2 Frontend Wiring (Section 2):** Implemented  export,  analytics on the Reports page, an Audit Log viewer in Settings, and a Health Grid view for clients.
+-   **Phase 2 New Features (Section 3):** Built and integrated systems for Innovation Update Due alerts, a healthcare Policy Alert System, AI-powered weekly summaries, and automated QBR scheduling follow-ups.
+-   **Microsoft 365 Integration (Section 4):** Fully integrated Microsoft Graph API using . Implemented backend endpoints and frontend UI for M365 configuration, testing, reading/sending emails via an Outlook Inbox UI, and viewing/creating calendar events.
+-   **NLP-Powered Alerts & Transcripts (Section 5):** Implemented NLP analysis of emails to auto-generate alerts for client frustration and scope creep. Added a full CRUD and analysis system for call transcripts, including AI-powered summaries and new stakeholder detection.
+-   **Comprehensive Testing:** Consistently used  after each major feature implementation (Sections 2-3, Section 4, Section 5) to ensure stability and correctness, achieving 100% pass rates.
 
 **Earlier issues found/mentioned but not fixed**
--   **Issue 1:**
-    -   **Description:** Invalid Unicode escape sequences are intermittently introduced into frontend  files, breaking React compilation.
+-   **Issue 1:** Invalid Unicode escape sequences are intermittently introduced into frontend  files by the agent, which can break React compilation.
     -   **Debug checklist:** If a  error occurs after a file write, the first step is to inspect the file for invalid characters and remove them.
-    -   **Why to solve this issue and what will be achieved with this?** This is a meta-issue with the agent's code generation that causes frequent, time-wasting errors.
+    -   **Why to solve this issue and what will be achieved with this?** This is a meta-issue with agent code generation that can cause time-wasting errors.
     -   **Should Test frontend/backend/both after fix:** Frontend (compilation check)
     -   **Is recurring issue?** Y
 
@@ -167,94 +60,93 @@ frontend: started. Check for compilation errors.
 
 
 **Key Technical Concepts**
--   **Frontend:** React, Tailwind CSS, , Shadcn UI, Recharts (for visualizations)
--   **Backend:** FastAPI, Python, Pydantic
+-   **Frontend:** React, Tailwind CSS, , Shadcn UI, Recharts (visualizations),  (icons)
+-   **Backend:** FastAPI, Python, Pydantic, Motor (async MongoDB)
 -   **Database:** MongoDB
--   **Authentication:** JWT with  password hashing
+-   **Authentication:** JWT with  password hashing.
+-   **Integrations:** Microsoft Graph API ( for auth), OpenAI ( for AI)
 -   **Document Generation:** 
 -   **Excel Parsing:** 
 
 **key DB schema**
--   : { email, hashed_password, name, role, assigned_clients }
--   : { name, status, assigned_csm, contract_start, contract_end, contracted_services, ... }
--   : { client_id, name, title, email, phone, role_type, ... }
--   : { client_id, period_start, period_end, denials_worked, dollars_recovered, sla_compliance_pct, ... }
--   : { client_id, alert_type, severity, status, trigger_data, assigned_to, ... }
--   : { client_id, contact_id, type, channel, subject, body, ... }
--   : { client_id, description, status, owner, priority, ... }
--   : { user_id, action_type, resource_type, details, ... }
+-   : { email, hashed_password, name, role, ... }
+-   : { name, status, contracted_services, last_innovation_briefing, ... }
+-   : { client_id, name, title, email, ... }
+-   : { client_id, period_end, recovery_rate, claims_processed, ... }
+-   : { client_id, alert_type, severity, status, ... }
+-   : { client_id, channel, subject, body, ... }
+-   : { client_id, title, status, priority_level, ... }
+-   : { user_id, action_type, resource_type, ... }
+-   : { name, slug, system_prompt, user_prompt_template, ... }
+-   : { title, policy_type, affected_services, effective_date, ... }
+-   : { client_id, cadence_type, frequency_days, status, ... }
+-   : { client_id, call_date, transcript_text, summary, sentiment, ... }
+-   : { integration_name, connection_status, config, ... }
 
 **changes in tech stack**
--   **Backend:** , ,  were added.
--   **Frontend:**  was added for data visualization.
+-   **Backend:**  library was added for Microsoft 365 authentication.
 
 **All files of reference**
--   : The single, monolithic file for all backend logic. Contains all data models, API endpoints, authentication, and background tasks. **Heavily modified and untested.**
--   : The script to populate the database. **Updated for  and new data structures.**
--   : The main frontend entry point. Defines routing, layout, and auth context. **Heavily modified and untested.**
--   : Defines the global Anka Blue color theme.
--   All files in : All page components were either created or heavily modified during the rebuild. **All are untested.**
--   : Contains the product requirements and has been updated.
+-   : The single, monolithic file for all backend logic. It has grown significantly and now contains all M365, NLP, and transcript logic.
+-   : Updated with secure passwords.
+-   : Heavily modified to include new tabs and components for Weekly Summary, Email Cadences, and Call Transcripts.
+-   : Heavily modified to add tabs and UI for Audit Logs, Policy Updates, and M365 Integration configuration.
+-   : Modified to include a full-featured Outlook Inbox tab.
+-   : Modified to display events from Outlook Calendar.
+-   : Updated with completed tasks.
 
 **Areas that need refactoring**:
--   The backend  is now over 1000 lines long and contains models, routes, auth, and business logic. It should be broken down into a more scalable structure (e.g., , , ).
--   The visual  component is defined within . It should be extracted into a shared component under  so it can be reused in  without code duplication.
+-   **Critical:** The backend  is now over 3,000 lines long. It urgently needs to be broken down into a more scalable structure (e.g., separate files for , , , ).
+-   The visual  component is defined within . It should be extracted into a shared component under  for reusability.
 
 **key api endpoints**
--    (Login)
--    (Get current user)
--   
--   , 
--   , 
--   
--   
--   
--   
--   
+-   **/api/integrations/microsoft-365/{configure, test}**: Setup M365 connection.
+-   **/api/email/{threads, thread/{id}, draft-reply, send}**: Read from and send via Outlook.
+-   **/api/calendar/{events, create-event}**: Read from and write to Outlook Calendar.
+-   **/api/policy-updates/**: CRUD for healthcare policy changes.
+-   **/api/transcripts/**: CRUD for call transcripts.
+-   **/api/transcripts/{id}/analyze**: AI analysis of a specific transcript.
 
 **Critical Info for New Agent**
--   **The Application is Broken:** Your first and highest priority is to stabilize the application. The previous agent performed a massive, untested refactor. You must install the new dependencies (, , ) and debug the backend and frontend until the application is running and login is possible.
--   **Follow the Phase 2 Plan:** The user has provided a very detailed list of requirements for Phase 2 (message #101). Once the app is stable, continue executing this plan systematically.
--   **Authentication Changed:** The password hashing now uses . The  script has been updated. Use the credentials from that script for testing.
--   **Monolithic Backend:** All backend code is in . Be mindful of this when adding new logic.
+-   **The Application is Stable and Tested:** Unlike the start of the last session, the application is fully functional. All recently added features have been validated by the testing agent.
+-   **Follow User's Detailed Prompts:** The user provides extremely detailed, prescriptive instructions for each block of work. Do not start new work without receiving such a prompt.
+-   **Monolithic Backend:** Be aware that all backend logic is in . While this is a major refactoring candidate, you must continue to work within this file for new features unless explicitly told to refactor. Use  or search to find relevant sections before adding code.
+-   **Existing Helpers:** The backend contains helper functions for key operations. Use them: , , , .
 
 **documents and test reports created in this job**
 -   
+-   Test reports from  are available at .
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Provided detailed Phase 2 requirements, emphasizing bug fixes, reporting visualizations, and UI polish. **Status: In Progress**.
-2.  **User:** give me the source code - **Status: Addressed**. The agent provided options for accessing the code.
-3.  **User:** proceed with my earlier instructions - **Status: Acknowledged**. User confirmed the agent should continue with the large rebuild task.
-4.  **User:** 1. yes 2. yes jwt is fine 3. realistic sample data for now - **Status: Addressed**. User approved the agent's proposed plan for the Phase 1 production rebuild.
-5.  **User:** Provided detailed Phase 1 requirements for the production rebuild. **Status: Completed**.
-6.  **User:** yes proceed - **Status: Acknowledged**. User gave the go-ahead to fix the initial color issue.
+1.  **User:** Provided detailed prompt for Section 5: NLP-Powered Alerts + Call Transcripts. **Status: Completed**.
+2.  **User:** Provided detailed prompt for Section 4: Microsoft 365 Integration. **Status: Completed**.
+3.  **User:** Provided detailed prompt covering Section 2: Punch List and Section 3: New Features. **Status: Completed**.
+4.  **Agent:** Finished implementation and testing of the app stabilization.
+5.  **User:** plan approved. you are consuming too many tokens without finishing the task. **Status: Addressed**. Agent acknowledged and proceeded with implementation.
+6.  **Agent:** Proposed plan to stabilize the application and then proceed with user's feature list.
 
 **Project Health Check:**
--   **Broken:**
-    -   **Entire Application:** The app is in a non-functional state due to massive, uncoordinated changes across the entire stack without any testing. New dependencies are missing, auth logic has changed, and numerous files were modified simultaneously.
--   **Mocked:**
-    -   ** Export:** The backend endpoint () exists but the core logic to create the document is likely incomplete.
-    -   **Audit Log:** The database model and API endpoint exist, but the logging mechanism is not yet integrated into all the relevant actions (e.g., alert resolution, report generation).
-    -   **Notification Dropdown:** The bell icon exists in the UI, but the dropdown panel and the logic to fetch recent alerts are not fully implemented.
+-   **Broken:** None.
+-   **Mocked:** None from the implemented sections. The core functionality is wired up.
 
 **3rd Party Integrations**
--   **OpenAI GPT-3.5-turbo** — uses Emergent LLM Key (for AI templates).
+-   **OpenAI GPT-4o** — uses Emergent LLM Key (for AI templates, summaries, NLP analysis).
+-   **Microsoft Graph API (Outlook & Calendar)** — uses  and User-provided App Registration keys (tenant_id, client_id, client_secret).
 -   **Recharts** — Frontend library for data visualization.
 -   **python-docx** — Backend library for generating Word documents.
 -   **openpyxl** — Backend library for parsing Excel files.
 
 **Testing status**
--   **Testing agent used after significant changes:** NO. This is the most critical next step.
+-   **Testing agent used after significant changes:** YES. Used after every major feature section was completed.
 -   **Troubleshoot agent used after agent stuck in loop:** NO
 -   **Test files created:** []
--   **Known regressions:** The entire application has regressed to a broken state.
+-   **Known regressions:** None.
 
 **Credentials to test flow:**
-Credentials are in . For example:
+Found in . User passwords have been updated for security.
 -   **cs_lead:**  / 
 -   **csm:**  / 
--   **ops:**  / 
+-   **admin:**  / 
 
 **What agent forgot to execute**
--   **Testing:** The agent failed to perform any testing or validation after making sweeping changes to the entire application, leaving it in a broken state.
--   **Dependency Management:** The agent added new dependencies in the code (, , ) but never installed them into the environment.</analysis>
+The agent has successfully executed all tasks from the user's detailed prompts. No items appear to have been overlooked.</analysis>
