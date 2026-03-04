@@ -3,9 +3,23 @@
 ## Original Problem Statement
 Build a comprehensive Healthcare Customer Success application for managing client relationships, performance tracking, alerting, communications, and reporting. The system needs production-grade features with real data models, role-based access control, and AI-powered capabilities.
 
-## What's Been Implemented (Phase 1-4 Complete - March 2026)
+## What's Been Implemented (Phase 1-5 Complete - March 2026)
 
-### Latest Updates (March 3, 2026 - Section 4: Microsoft 365 Integration)
+### Latest Updates (March 4, 2026 - Section 5: NLP-Powered Alerts + Call Transcripts)
+- ✅ CallTranscript model with all required fields (call_date, attendees, transcript_text, summary, action_items, sentiment, new_attendees)
+- ✅ NLP helper functions: analyze_email_sentiment() and analyze_scope_creep() using Emergent LLM
+- ✅ Scheduler integration for NLP email analysis (runs when M365 connected)
+- ✅ CRUD endpoints: GET/POST /api/transcripts, POST /api/transcripts/{id}/analyze
+- ✅ New stakeholder detection: compares attendees against client_contacts
+- ✅ Auto-generation of new_stakeholder alerts (severity: low) for unrecognized attendees
+- ✅ Frontend: "Call Notes & Transcripts" section in ClientDetailPage Communications tab
+- ✅ Upload Call Notes dialog with date, duration, attendees, transcript_text fields
+- ✅ AI-powered analysis with summary, action items, sentiment badges
+- ✅ "New stakeholders" badge and blue detail panel for detected unknown attendees
+- ✅ Audit logging for transcript_create and transcript_analysis actions
+- ✅ All tests passed (100% backend, 100% frontend)
+
+### Previous Updates (March 3, 2026 - Section 4: Microsoft 365 Integration)
 - ✅ Added msal library for OAuth client credentials flow
 - ✅ Graph API helper function (get_graph_token)
 - ✅ M365 Configure and Test Connection endpoints
@@ -43,12 +57,13 @@ Build a comprehensive Healthcare Customer Success application for managing clien
 - **Client Account**: name, contract dates, services, SLA targets, status, health_score, last_innovation_briefing
 - **Client Contact**: client_id, name, title, role_type (decision-maker/influencer/operations/billing)
 - **Performance Record**: client_id, period, denials_worked, dollars_recovered, recovery_rate, denial_codes, payer_breakdown, claims_processed, avg_turnaround_days, team_size
-- **Alert**: client_id, alert_type (7 types), severity, status (active/acknowledged/resolved/snoozed)
+- **Alert**: client_id, alert_type (9 types including frustration, scope_creep), severity, status (active/acknowledged/resolved/snoozed)
 - **Communication**: client_id, type (draft/sent/received), channel, ai_generated
 - **Follow-Up Item**: client_id, priority_score, category (call_required/email_sufficient)
 - **Prompt Template**: 8 pre-loaded AI templates
 - **Policy Update**: title, description, policy_type, affected_services, affected_payers
 - **Email Cadence**: client_id, cadence_type, frequency_days, status, template_slug
+- **Call Transcript**: client_id, call_date, attendees, transcript_text, summary, action_items, sentiment, new_attendees
 - **Audit Log**: user_id, action_type, resource_type, details, timestamp
 
 ### Pages & Navigation
@@ -72,6 +87,8 @@ Build a comprehensive Healthcare Customer Success application for managing clien
 - innovation_update_due (Sparkles icon, blue)
 - policy_update (FileText icon, amber)
 - new_stakeholder (UserPlus icon, blue)
+- frustration (AlertOctagon icon, red) - NLP detected from emails
+- scope_creep (ArrowUpRight icon, amber) - NLP detected from emails
 
 ### Login Credentials
 | Role | Email | Password |
@@ -113,6 +130,9 @@ Build a comprehensive Healthcare Customer Success application for managing clien
 - **Settings**: `/api/settings/alert-thresholds`
 - **CRM Stub**: `/api/crm/contacts`, `/api/crm/deals`, `/api/crm/tickets`, `/api/crm/sync`
 - **Dashboard**: `/api/dashboard/metrics`
+- **Email (M365)**: `/api/email/threads`, `/api/email/thread/{id}`, `/api/email/draft-reply`, `/api/email/send`
+- **Calendar (M365)**: `/api/calendar/events`, `/api/calendar/create-event`
+- **Transcripts**: `/api/transcripts` (GET, POST), `/api/transcripts/{id}/analyze`
 
 ### Seed Data
 - 5 users (admin, CS lead, 2 CSMs, ops)
@@ -173,4 +193,4 @@ Build a comprehensive Healthcare Customer Success application for managing clien
 - **Alert Low**: Gray
 
 ## Last Updated
-December 2025 - Phase 1 Production Rebuild Complete
+March 4, 2026 - Section 5 NLP-Powered Alerts + Call Transcripts Complete
